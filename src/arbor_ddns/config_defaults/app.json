@@ -1,0 +1,37 @@
+{
+  "config_version": 1,
+  "discovery": {
+    "pct_bin": "pct",
+    "qm_bin": "qm",
+    "shell_bin": "sh"
+  },
+  "dns": {
+    "default_ttl": 300
+  },
+  "providers": {
+    "alidns": {
+      "enabled": false,
+      "access_key_id": null,
+      "access_key_secret": null,
+      "region_id": "cn-hangzhou"
+    },
+    "cloudflare": {
+      "enabled": false,
+      "api_token": null,
+      "zone_id": null
+    }
+  },
+  "inventory": {
+    "entries": [
+      {
+        "kind": "lxc",
+        "id": 100,
+        "fqdn": "guest.example.com",
+        "provider": "cloudflare",
+        "selection_policy": "default",
+        "enabled": false
+      }
+    ]
+  }
+}
+

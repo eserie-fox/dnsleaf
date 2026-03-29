@@ -1,0 +1,76 @@
+"""Models used by discovery backends and selectors."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from arbor_ddns.models import SelectedAddress, TargetRef
+from arbor_ddns.util.ip import normalize_ipv6
+
+
+class AddressCandidate(BaseModel):
+    """A discovered IPv6 candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interface: str
+    address: str
+    prefix_length: int = Field(ge=0, le=128)
+    source: str
+    scope: str | None = None
+    flags: list[str] = Field(default_factory=list)
+
+    @field_validator("address")
+    @classmethod
+    def _normalize_address(cls, value: str) -> str:
+        return normalize_ipv6(value)
+
+    @property
+    def cidr(self) -> str:
+        """Return the normalized CIDR representation."""
+
+        return f"{self.address}/{self.prefix_length}"
+
+
+class CandidateDisposition(BaseModel):
+    """Information about a candidate that was filtered or not selected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate: AddressCandidate
+    reason: str
+
+
+class DiscoveryResult(BaseModel):
+    """Raw candidate discovery output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: TargetRef
+    backend: str
+    candidates: list[AddressCandidate] = Field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        """Return whether discovery succeeded."""
+
+        return self.error is None
+
+
+class SelectionResult(BaseModel):
+    """Address selection outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: TargetRef
+    policy: str
+    status: Literal["selected", "ambiguous", "no_candidate"]
+    selected: SelectedAddress | None = None
+    remaining_candidates: list[AddressCandidate] = Field(default_factory=list)
+    filtered_out: list[CandidateDisposition] = Field(default_factory=list)
+    not_selected: list[CandidateDisposition] = Field(default_factory=list)
+    reason: str
+
