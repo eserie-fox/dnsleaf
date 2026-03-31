@@ -45,7 +45,6 @@ ConfigPathOption = Annotated[
 WorkspaceOption = Annotated[
     Path,
     typer.Option(
-        Path("."),
         "--workspace",
         "-w",
         help="Workspace directory. Defaults to the current directory.",
@@ -92,7 +91,7 @@ def init_command(
 
 @app.command("validate")
 def validate_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     config: ConfigPathOption = None,
 ) -> None:
@@ -107,7 +106,7 @@ def validate_command(
 
 @app.command("render")
 def render_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     config: ConfigPathOption = None,
 ) -> None:
@@ -122,7 +121,7 @@ def render_command(
 
 @app.command("apply")
 def apply_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     prune_managed: Annotated[
         bool,
@@ -164,7 +163,7 @@ def apply_command(
 
 @app.command("uninstall")
 def uninstall_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     purge: Annotated[
         bool,
@@ -183,7 +182,7 @@ def uninstall_command(
 
 @app.command("status")
 def status_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     config: ConfigPathOption = None,
 ) -> None:
@@ -200,7 +199,7 @@ def status_command(
 
 @app.command("doctor")
 def doctor_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     config: ConfigPathOption = None,
 ) -> None:
@@ -214,7 +213,7 @@ def doctor_command(
 
 @app.command("plan")
 def plan_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     prune_managed: Annotated[
         bool,
@@ -243,7 +242,7 @@ def plan_command(
 
 @app.command("sync-once")
 def sync_once_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     apply: Annotated[
         bool,
@@ -277,7 +276,7 @@ def sync_once_command(
 
 @provider_app.command("verify")
 def provider_verify_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     config: ConfigPathOption = None,
 ) -> None:
@@ -292,7 +291,7 @@ def provider_verify_command(
 
 @entry_app.command("list")
 def entry_list_command(
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     json_output: JsonOption = False,
     config: ConfigPathOption = None,
 ) -> None:
@@ -319,7 +318,7 @@ def entry_list_command(
 @entry_app.command("update")
 def entry_update_command(
     name: str,
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     fqdn: Annotated[str | None, typer.Option("--fqdn")] = None,
     selection_policy: Annotated[str | None, typer.Option("--selection-policy")] = None,
     enabled: Annotated[bool | None, typer.Option("--enabled")] = None,
@@ -351,7 +350,7 @@ def entry_update_command(
 @entry_app.command("remove")
 def entry_remove_command(
     name: str,
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     config: ConfigPathOption = None,
 ) -> None:
     """Remove a workspace entry."""
@@ -366,7 +365,7 @@ def entry_remove_command(
 @entry_app.command("enable")
 def entry_enable_command(
     name: str,
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     config: ConfigPathOption = None,
 ) -> None:
     """Enable a workspace entry."""
@@ -381,7 +380,7 @@ def entry_enable_command(
 @entry_app.command("disable")
 def entry_disable_command(
     name: str,
-    workspace: WorkspaceOption,
+    workspace: WorkspaceOption = Path("."),
     config: ConfigPathOption = None,
 ) -> None:
     """Disable a workspace entry."""
@@ -395,10 +394,10 @@ def entry_disable_command(
 
 @entry_add_app.command("lxc")
 def entry_add_lxc(
-    workspace: WorkspaceOption,
     source_id: Annotated[int, typer.Option("--id")],
     fqdn: Annotated[str, typer.Option("--fqdn")],
     name: Annotated[str, typer.Option("--name")],
+    workspace: WorkspaceOption = Path("."),
     selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
     ttl: Annotated[int | None, typer.Option("--ttl")] = None,
     proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
@@ -426,10 +425,10 @@ def entry_add_lxc(
 
 @entry_add_app.command("vm")
 def entry_add_vm(
-    workspace: WorkspaceOption,
     source_id: Annotated[int, typer.Option("--id")],
     fqdn: Annotated[str, typer.Option("--fqdn")],
     name: Annotated[str, typer.Option("--name")],
+    workspace: WorkspaceOption = Path("."),
     selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
     ttl: Annotated[int | None, typer.Option("--ttl")] = None,
     proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
