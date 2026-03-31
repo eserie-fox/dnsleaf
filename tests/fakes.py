@@ -6,7 +6,7 @@ from arbor_ddns.discovery.base import DiscoveryBackend
 from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult
 from arbor_ddns.dns.base import DNSProvider
 from arbor_ddns.dns.models import DNSRecord, PlannedChange, ProviderVerification
-from arbor_ddns.models import TargetRef
+from arbor_ddns.models import IPAddressFamily, TargetRef
 from arbor_ddns.util.process import CommandResult
 from arbor_ddns.workspace.models import SystemdUnitStatus
 from arbor_ddns.workspace.storage import WorkspacePaths
@@ -15,18 +15,29 @@ from arbor_ddns.workspace.storage import WorkspacePaths
 class FakeDiscoveryBackend(DiscoveryBackend):
     name = "fake_discovery"
 
+    def __init__(self, candidates: list[AddressCandidate] | None = None) -> None:
+        self._candidates = candidates or [
+            AddressCandidate(
+                family=IPAddressFamily.IPV4,
+                interface="eth0",
+                address="93.184.216.34",
+                prefix_length=32,
+                source=self.name,
+            ),
+            AddressCandidate(
+                family=IPAddressFamily.IPV6,
+                interface="eth0",
+                address="2408:8266:5003:506a::3d6",
+                prefix_length=128,
+                source=self.name,
+            ),
+        ]
+
     def discover(self, target: TargetRef) -> DiscoveryResult:
         return DiscoveryResult(
             target=target,
             backend=self.name,
-            candidates=[
-                AddressCandidate(
-                    interface="eth0",
-                    address="2408:8266:5003:506a::3d6",
-                    prefix_length=128,
-                    source=self.name,
-                )
-            ],
+            candidates=list(self._candidates),
         )
 
 

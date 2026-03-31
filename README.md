@@ -1,12 +1,13 @@
 # arbor-ddns
 
-`arbor-ddns` is a lightweight, workspace-driven DDNS tool for PVE guests.
-It discovers guest IPv6 addresses from the PVE host, selects one stable AAAA target, plans the required Cloudflare DNS changes, and can install a systemd timer for periodic sync.
+`arbor-ddns` is a lightweight, workspace-driven DDNS tool for PVE guests and static IP targets.
+It discovers guest IPv4 and IPv6 addresses from the PVE host, selects publishable dynamic candidates, syncs `A` and `AAAA` records to Cloudflare, and can install a systemd timer for periodic runs.
 
-The current scope is intentionally narrow:
+Current scope:
 
 - discovery backends: `pct exec` for LXC, `qm agent network-get-interfaces` for VMs
-- address selection: IPv6-only, tuned for DNS AAAA
+- address selection: public IPv4 and global IPv6, with explicit ambiguity handling
+- static entries: direct IPv4, IPv6, or dual-stack values
 - DNS provider: Cloudflare only
 - operations model: workspace source files + rendered artifacts + state
 
@@ -43,13 +44,23 @@ uv run arbor-ddns entry add lxc \
   --workspace ./workspaces/example-zone \
   --id 101 \
   --fqdn host.example.com \
-  --name web
+  --name web \
+  --family both
 
 uv run arbor-ddns entry add vm \
   --workspace ./workspaces/example-zone \
   --id 201 \
   --fqdn vm.example.com \
-  --name guest
+  --name guest \
+  --family ipv6
+
+uv run arbor-ddns entry add static \
+  --workspace ./workspaces/example-zone \
+  --fqdn edge.example.com \
+  --name edge \
+  --family both \
+  --ipv4 93.184.216.34 \
+  --ipv6 2408:8266:5003:506a::88
 ```
 
 You can also change into the workspace and omit `--workspace` on all workspace-aware commands:
@@ -75,6 +86,8 @@ cd ./workspaces/example-zone
 uv run arbor-ddns sync-once
 uv run arbor-ddns sync-once --apply
 ```
+
+`family=both` is handled as two independent flows. One family may `create`, `update`, or `noop` while the other is skipped because discovery was ambiguous or had no usable candidate.
 
 7. Render artifacts or install systemd units.
 
@@ -140,8 +153,8 @@ uv run arbor-ddns uninstall --workspace ./workspaces/example-zone --purge
 - `arbor-ddns provider verify [--workspace <dir>]`
 - `arbor-ddns plan [--workspace <dir>]`
 - `arbor-ddns sync-once [--workspace <dir>] [--apply]`
-- `arbor-ddns discover lxc <id>`
-- `arbor-ddns discover vm <id>`
+- `arbor-ddns discover lxc <id> [--family ipv4|ipv6|both]`
+- `arbor-ddns discover vm <id> [--family ipv4|ipv6|both]`
 
 ## Testing
 

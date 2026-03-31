@@ -7,17 +7,19 @@ import re
 from typing import Any
 
 from arbor_ddns.discovery.models import AddressCandidate
-from arbor_ddns.util.ip import parse_ipv6_interface
+from arbor_ddns.models import IPAddressFamily
+from arbor_ddns.util.ip import parse_ip_interface
 
 IP_ADDR_LINE_RE = re.compile(
-    r"^\d+:\s+(?P<interface>\S+)\s+inet6\s+"
-    r"(?P<cidr>[0-9A-Fa-f:]+/\d+)\s+scope\s+"
+    r"^\d+:\s+(?P<interface>\S+)\s+"
+    r"(?P<kind>inet|inet6)\s+"
+    r"(?P<cidr>[^ ]+/\d+)\s+scope\s+"
     r"(?P<scope>\S+)(?:\s+(?P<flags>.*))?$"
 )
 
 
 def parse_lxc_ip_addr_output(output: str, *, source: str = "pve_lxc") -> list[AddressCandidate]:
-    """Parse `ip -6 -o addr show` output from an LXC guest."""
+    """Parse `ip -o addr show` output from an LXC guest."""
 
     candidates: list[AddressCandidate] = []
     for raw_line in output.splitlines():
@@ -27,11 +29,12 @@ def parse_lxc_ip_addr_output(output: str, *, source: str = "pve_lxc") -> list[Ad
         match = IP_ADDR_LINE_RE.match(line)
         if match is None:
             raise ValueError(f"unable to parse ip addr output line: {line}")
-        address, prefix_length = parse_ipv6_interface(match.group("cidr"))
+        address, prefix_length, family = parse_ip_interface(match.group("cidr"))
         flags_text = match.group("flags") or ""
         flags = [flag for flag in flags_text.split() if flag]
         candidates.append(
             AddressCandidate(
+                family=IPAddressFamily(family),
                 interface=match.group("interface").split("@", maxsplit=1)[0],
                 address=str(address),
                 prefix_length=prefix_length,
@@ -81,15 +84,19 @@ def parse_qga_interfaces(
         for ip_data in ip_addresses:
             if not isinstance(ip_data, dict):
                 raise ValueError("QGA ip-addresses item must be an object")
-            if ip_data.get("ip-address-type") != "ipv6":
+            ip_address_type = ip_data.get("ip-address-type")
+            if ip_address_type not in {"ipv4", "ipv6"}:
                 continue
             address = ip_data.get("ip-address")
             prefix = ip_data.get("prefix")
             if not isinstance(address, str) or not isinstance(prefix, int):
-                raise ValueError("QGA ipv6 address entry is missing address/prefix")
-            parsed_address, prefix_length = parse_ipv6_interface(f"{address}/{prefix}")
+                raise ValueError(
+                    f"QGA {ip_address_type} address entry is missing address/prefix"
+                )
+            parsed_address, prefix_length, family = parse_ip_interface(f"{address}/{prefix}")
             candidates.append(
                 AddressCandidate(
+                    family=IPAddressFamily(family),
                     interface=interface_name,
                     address=str(parsed_address),
                     prefix_length=prefix_length,

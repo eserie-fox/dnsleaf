@@ -9,6 +9,7 @@ from arbor_ddns.util.process import CommandResult
 
 def test_pve_lxc_backend_parses_ip_output() -> None:
     sample_output = """
+2: eth0    inet 93.184.216.34/32 scope global
 2: eth0    inet6 2408:8266:5003:506a:be24:11ff:fefb:7700/64 scope global dynamic mngtmpaddr
 9: tun0    inet6 fd42:42:42:42::1/112 scope global
 """.strip()
@@ -23,6 +24,12 @@ def test_pve_lxc_backend_parses_ip_output() -> None:
 
     assert result.error is None
     assert [candidate.cidr for candidate in result.candidates] == [
+        "93.184.216.34/32",
         "2408:8266:5003:506a:be24:11ff:fefb:7700/64",
         "fd42:42:42:42::1/112",
+    ]
+    assert [candidate.family.value for candidate in result.candidates] == [
+        "ipv4",
+        "ipv6",
+        "ipv6",
     ]

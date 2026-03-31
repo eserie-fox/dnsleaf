@@ -8,11 +8,11 @@ from arbor_ddns.discovery.parser import parse_lxc_ip_addr_output
 from arbor_ddns.models import TargetKind, TargetRef
 from arbor_ddns.util.process import ProcessRunner, run_command
 
-LXC_DISCOVERY_COMMAND = "ip -6 -o addr show"
+LXC_DISCOVERY_COMMAND = "ip -o addr show"
 
 
 class PVELXCDiscoveryBackend(DiscoveryBackend):
-    """Discover IPv6 addresses by executing `ip` inside an LXC guest."""
+    """Discover IPv4 and IPv6 addresses by executing `ip` inside an LXC guest."""
 
     name = "pve_lxc"
 
@@ -46,4 +46,3 @@ class PVELXCDiscoveryBackend(DiscoveryBackend):
             return DiscoveryResult(target=target, backend=self.name, candidates=candidates)
         except Exception as exc:
             return DiscoveryResult(target=target, backend=self.name, error=str(exc))
-

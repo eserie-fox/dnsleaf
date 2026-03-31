@@ -21,7 +21,7 @@ The provider does not choose guest IP addresses.
 The planner compares:
 
 - current provider state
-- desired single-record state
+- desired single-record state for one concrete `A` or `AAAA` flow
 
 It returns deterministic changes:
 
@@ -29,6 +29,8 @@ It returns deterministic changes:
 - `update`
 - `delete`
 - `noop`
+
+When a workspace entry has `family=both`, the runner simply constructs two independent desired records and sends them through the same planner.
 
 ## Verify flow
 

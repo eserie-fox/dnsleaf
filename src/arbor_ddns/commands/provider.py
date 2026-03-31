@@ -1,0 +1,30 @@
+"""DNS provider CLI commands."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import typer
+
+from arbor_ddns.commands import common
+
+
+def register(app: typer.Typer) -> None:
+    """Register `provider` commands."""
+
+    provider_app = typer.Typer(help="Provider-specific operations.")
+    app.add_typer(provider_app, name="provider")
+
+    @provider_app.command("verify")
+    def provider_verify_command(
+        workspace: Path = common.WORKSPACE_OPTION,
+        json_output: bool = common.JSON_OPTION,
+        config: Path | None = common.CONFIG_OPTION,
+    ) -> None:
+        """Verify the Cloudflare provider configuration and API access."""
+
+        try:
+            report = common.workspace_service(config).provider_verify(workspace)
+        except Exception as exc:
+            common.exit_with_error(exc, json_output=json_output)
+        common.echo_model_or_text(report, json_output, common.format_provider_verification)

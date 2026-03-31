@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from arbor_ddns.models import TargetKind
+from arbor_ddns.models import EntryAddressFamily, EntrySourceKind
 from arbor_ddns.workspace.models import EntriesFile, EntryMutationResult, WorkspaceEntry
 from arbor_ddns.workspace.storage import WorkspaceLoadError, WorkspaceStorage, dump_yaml_data
 
@@ -26,29 +26,38 @@ class EntryService:
         *,
         name: str,
         source_kind: str,
-        source_id: int,
         fqdn: str,
-        selection_policy: str = "default",
+        family: str,
+        source_id: int | None = None,
+        selection_policy: str | None = None,
         ttl: int | None = None,
         proxied: bool | None = None,
         description: str | None = None,
+        static_ipv4: str | None = None,
+        static_ipv6: str | None = None,
     ) -> EntryMutationResult:
-        """Add an `AAAA` entry."""
+        """Add one workspace entry."""
 
         loaded = self._storage.load(workspace_dir)
         if loaded.entries_file.get(name) is not None:
             raise WorkspaceLoadError(f"entry already exists: {name}")
         entry = WorkspaceEntry(
             name=name,
-            source_kind=TargetKind(source_kind),
+            source_kind=EntrySourceKind(source_kind),
             source_id=source_id,
             fqdn=fqdn,
-            record_type="AAAA",
-            selection_policy=selection_policy,
+            family=EntryAddressFamily(family),
+            selection_policy=(
+                selection_policy
+                if EntrySourceKind(source_kind) is EntrySourceKind.STATIC
+                else (selection_policy or "default")
+            ),
             enabled=True,
             ttl=ttl,
             proxied=proxied,
             description=description,
+            static_ipv4=static_ipv4,
+            static_ipv6=static_ipv6,
         )
         updated = EntriesFile(
             config_version=loaded.entries_file.config_version,
@@ -68,12 +77,15 @@ class EntryService:
         *,
         name: str,
         fqdn: str | None = None,
+        family: str | None = None,
         selection_policy: str | None = None,
         enabled: bool | None = None,
         ttl: int | None = None,
         proxied: bool | None = None,
         source_id: int | None = None,
         description: str | None = None,
+        static_ipv4: str | None = None,
+        static_ipv6: str | None = None,
     ) -> EntryMutationResult:
         """Update a named entry."""
 
@@ -84,6 +96,8 @@ class EntryService:
         patch = existing.model_dump(mode="python")
         if fqdn is not None:
             patch["fqdn"] = fqdn
+        if family is not None:
+            patch["family"] = family
         if selection_policy is not None:
             patch["selection_policy"] = selection_policy
         if enabled is not None:
@@ -96,6 +110,10 @@ class EntryService:
             patch["source_id"] = source_id
         if description is not None:
             patch["description"] = description
+        if static_ipv4 is not None:
+            patch["static_ipv4"] = static_ipv4
+        if static_ipv6 is not None:
+            patch["static_ipv6"] = static_ipv6
         updated_entry = WorkspaceEntry.model_validate(patch)
         new_entries = [
             updated_entry if entry.name == name else entry for entry in loaded.entries_file.entries

@@ -173,7 +173,7 @@ class WorkspaceStorage:
                 prune_managed_records=scaffold.apply.prune_managed_records,
             ),
         )
-        entries_file = EntriesFile(config_version=1, entries=[])
+        entries_file = EntriesFile(config_version=2, entries=[])
         dump_yaml_data(
             paths.workspace_file,
             workspace_config.model_dump(mode="json", exclude_none=True),

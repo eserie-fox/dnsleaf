@@ -9,8 +9,9 @@ The runtime flow is:
 More explicitly:
 
 1. `workspace.yaml` and `entries.yaml` are loaded from a workspace directory.
-2. Discovery backends gather IPv6 candidates from PVE.
-3. The selector chooses one IPv6 address or returns an explicit non-selection result.
+2. Dynamic entries use discovery backends to gather IPv4 and IPv6 candidates from PVE.
+3. The selector chooses one family-specific address or returns an explicit non-selection result.
+4. Static entries bypass discovery and selection entirely.
 4. Cloudflare current state is queried.
 5. The planner decides `create`, `update`, `delete`, or `noop`.
 6. Optional apply mutates Cloudflare state and updates workspace state files.
@@ -23,15 +24,15 @@ More explicitly:
   - renders derived artifacts
   - aggregates status and doctor output
 - `arbor_ddns.discovery`
-  - collects IPv6 candidate addresses from PVE
-  - contains address-selection logic
+  - collects IPv4 and IPv6 candidate addresses from PVE
+  - contains family-specific selection logic
   - never calls DNS APIs
 - `arbor_ddns.dns`
   - contains the Cloudflare provider and the generic planner
   - never decides which guest IP is better
 - `arbor_ddns.sync`
-  - performs thin orchestration for plan and sync-once
-  - operates on resolved workspace entries
+  - performs thin orchestration for `plan` and `sync-once`
+  - expands one entry into one or two concrete record flows
 - `arbor_ddns.systemd`
   - renders unit files
   - installs, uninstalls, and queries systemd units
@@ -49,7 +50,7 @@ The primary editing surface is the workspace directory:
 - `runtime/`: workspace-local logs and runtime files
 - `state/`: apply and managed-record tracking
 
-The older single inventory-style model is no longer the primary workflow.
+The older inventory-style model is no longer part of the workspace workflow.
 
 ## Cloudflare-only scope
 

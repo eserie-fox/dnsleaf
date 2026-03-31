@@ -24,7 +24,7 @@ def test_pve_qga_backend_parses_network_interfaces() -> None:
                         "ip-address": "2408:8266:5003:506a:e27f:4076:f737:e75a",
                         "prefix": 64,
                     },
-                    {"ip-address-type": "ipv4", "ip-address": "192.0.2.10", "prefix": 24},
+                    {"ip-address-type": "ipv4", "ip-address": "93.184.216.34", "prefix": 32},
                 ],
             }
         ]
@@ -42,4 +42,5 @@ def test_pve_qga_backend_parses_network_interfaces() -> None:
     assert [candidate.cidr for candidate in result.candidates] == [
         "2408:8266:5003:506a::458/128",
         "2408:8266:5003:506a:e27f:4076:f737:e75a/64",
+        "93.184.216.34/32",
     ]

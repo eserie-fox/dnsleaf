@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from arbor_ddns.models import SelectedAddress, TargetRef
-from arbor_ddns.util.ip import normalize_ipv6
+from arbor_ddns.models import IPAddressFamily, SelectedAddress, TargetRef
+from arbor_ddns.util.ip import normalize_ip
 
 
 class AddressCandidate(BaseModel):
-    """A discovered IPv6 candidate."""
+    """A discovered IP candidate."""
 
     model_config = ConfigDict(extra="forbid")
 
+    family: IPAddressFamily
     interface: str
     address: str
     prefix_length: int = Field(ge=0, le=128)
@@ -25,13 +26,25 @@ class AddressCandidate(BaseModel):
     @field_validator("address")
     @classmethod
     def _normalize_address(cls, value: str) -> str:
-        return normalize_ipv6(value)
+        return normalize_ip(value)
+
+    @model_validator(mode="after")
+    def _validate_prefix_for_family(self) -> AddressCandidate:
+        if self.family is IPAddressFamily.IPV4 and self.prefix_length > 32:
+            raise ValueError("ipv4 prefix length must be <= 32")
+        return self
 
     @property
     def cidr(self) -> str:
         """Return the normalized CIDR representation."""
 
         return f"{self.address}/{self.prefix_length}"
+
+    @property
+    def record_type(self) -> str:
+        """Return the DNS record type for this candidate."""
+
+        return self.family.record_type
 
 
 class CandidateDisposition(BaseModel):
@@ -61,11 +74,12 @@ class DiscoveryResult(BaseModel):
 
 
 class SelectionResult(BaseModel):
-    """Address selection outcome."""
+    """Address selection outcome for one family."""
 
     model_config = ConfigDict(extra="forbid")
 
     target: TargetRef
+    family: IPAddressFamily
     policy: str
     status: Literal["selected", "ambiguous", "no_candidate"]
     selected: SelectedAddress | None = None
@@ -73,4 +87,3 @@ class SelectionResult(BaseModel):
     filtered_out: list[CandidateDisposition] = Field(default_factory=list)
     not_selected: list[CandidateDisposition] = Field(default_factory=list)
     reason: str
-

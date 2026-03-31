@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from datetime import UTC, datetime
-from logging import LoggerAdapter
+from logging import Logger, LoggerAdapter
 from pathlib import Path
 from typing import Literal
 
@@ -28,8 +28,8 @@ from arbor_ddns.workspace.models import (
     ValidationReport,
     WorkspaceStatus,
 )
-from arbor_ddns.workspace.runtime_logging import close_workspace_logger, workspace_command_logger
 from arbor_ddns.workspace.renderer import WorkspaceRenderer
+from arbor_ddns.workspace.runtime_logging import close_workspace_logger, workspace_command_logger
 from arbor_ddns.workspace.state import (
     load_last_apply,
     load_managed_records,
@@ -420,7 +420,7 @@ class WorkspaceService:
             )
         )
 
-        logger: LoggerAdapter | None = None
+        logger: LoggerAdapter[Logger] | None = None
         if paths.runtime_dir.exists():
             logger = workspace_command_logger(
                 loaded.paths,
@@ -495,7 +495,10 @@ class WorkspaceService:
         else:
             report.warnings.append("systemctl is not available; skipped stop/disable/daemon-reload")
 
-        removed_service = self._systemd_manager.remove_installed_unit(report.service_name, "service")
+        removed_service = self._systemd_manager.remove_installed_unit(
+            report.service_name,
+            "service",
+        )
         report.service_unit_removed = removed_service is not None
         if removed_service is not None:
             report.removed_paths.append(str(removed_service))
@@ -597,7 +600,7 @@ class WorkspaceService:
         *,
         command_name: str,
         runtime_validate: bool = True,
-    ) -> tuple[LoadedWorkspace, LoggerAdapter]:
+    ) -> tuple[LoadedWorkspace, LoggerAdapter[Logger]]:
         loaded = self._storage.load(workspace_dir)
         logger = workspace_command_logger(
             loaded.paths,
@@ -613,44 +616,51 @@ class WorkspaceService:
                 raise
         return loaded, logger
 
-    def _log_run_report(self, logger: LoggerAdapter, report: WorkspaceRunReport) -> None:
+    def _log_run_report(
+        self,
+        logger: LoggerAdapter[Logger],
+        report: WorkspaceRunReport,
+    ) -> None:
         logger.info(
-            "run_summary dry_run=%s entries=%d prune_candidates=%d warnings=%d",
+            "run_summary dry_run=%s records=%d prune_candidates=%d warnings=%d",
             report.dry_run,
-            len(report.entry_outcomes),
+            len(report.record_outcomes),
             len(report.prune_outcomes),
             len(report.warnings),
         )
-        for outcome in report.entry_outcomes:
+        for outcome in report.record_outcomes:
             actions = "-"
             if outcome.plan is not None:
                 actions = ",".join(change.action for change in outcome.plan.changes)
             log_fn = logger.error if outcome.status == "error" else logger.info
             log_fn(
-                "entry=%s fqdn=%s type=%s selection=%s selected=%s action=%s status=%s message=%s",
+                "entry=%s fqdn=%s type=%s family=%s source=%s selection=%s selected=%s "
+                "action=%s status=%s message=%s",
                 outcome.entry_name,
                 outcome.fqdn,
                 outcome.record_type,
-                outcome.selection_status,
+                outcome.family.value,
+                outcome.value_source,
+                outcome.selection_status or "-",
                 outcome.selected_value or "-",
                 actions,
                 outcome.status,
                 outcome.message,
             )
-        for outcome in report.prune_outcomes:
+        for prune_outcome in report.prune_outcomes:
             actions = "-"
-            if outcome.plan is not None:
-                actions = ",".join(change.action for change in outcome.plan.changes)
-            log_fn = logger.error if outcome.status == "error" else logger.info
+            if prune_outcome.plan is not None:
+                actions = ",".join(change.action for change in prune_outcome.plan.changes)
+            log_fn = logger.error if prune_outcome.status == "error" else logger.info
             log_fn(
                 "prune_entry=%s fqdn=%s type=%s record_id=%s action=%s status=%s message=%s",
-                outcome.entry_name,
-                outcome.fqdn,
-                outcome.record_type,
-                outcome.record_id or "-",
+                prune_outcome.entry_name,
+                prune_outcome.fqdn,
+                prune_outcome.record_type,
+                prune_outcome.record_id or "-",
                 actions,
-                outcome.status,
-                outcome.message,
+                prune_outcome.status,
+                prune_outcome.message,
             )
         for warning in report.warnings:
             logger.warning("warning=%s", warning)
@@ -661,7 +671,11 @@ class WorkspaceService:
         state: ManagedRecordFile,
         report: WorkspaceRunReport,
     ) -> ManagedRecordFile:
-        enabled_descriptors = {entry.descriptor for entry in loaded.entries_file.enabled_entries()}
+        enabled_descriptors = {
+            descriptor
+            for entry in loaded.entries_file.enabled_entries()
+            for descriptor in entry.descriptors()
+        }
         records_by_descriptor = {record.descriptor: record for record in state.records}
         now = _utc_now()
 
@@ -669,7 +683,7 @@ class WorkspaceService:
             record.state = "active" if record.descriptor in enabled_descriptors else "stale"
             record.last_seen_at = now
 
-        for outcome in report.entry_outcomes:
+        for outcome in report.record_outcomes:
             if outcome.final_record is None:
                 continue
             descriptor = f"{outcome.entry_name}|{outcome.fqdn}|{outcome.record_type}"

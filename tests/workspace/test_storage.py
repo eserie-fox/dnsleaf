@@ -49,36 +49,55 @@ def test_validate_resolves_relative_token_file(workspace_dir: Path) -> None:
     assert report.token_file.endswith("secrets/cloudflare_api_token.txt")
 
 
-def test_validate_rejects_reserved_a_record_type(workspace_dir: Path) -> None:
+def test_validate_rejects_old_record_type_entry_schema(workspace_dir: Path) -> None:
     (workspace_dir / "entries.yaml").write_text(
         (
-            "config_version: 1\n"
-            "entries:\n"
-            "  - name: web\n"
-            "    source_kind: lxc\n"
-            "    source_id: 101\n"
-            "    fqdn: host.example.com\n"
-            "    record_type: A\n"
-            "    selection_policy: default\n"
-            "    enabled: true\n"
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="reserved"):
-        WorkspaceService().validate_workspace(workspace_dir)
-
-
-def test_render_generates_effective_workspace_and_systemd_artifacts(workspace_dir: Path) -> None:
-    (workspace_dir / "entries.yaml").write_text(
-        (
-            "config_version: 1\n"
+            "config_version: 2\n"
             "entries:\n"
             "  - name: web\n"
             "    source_kind: lxc\n"
             "    source_id: 101\n"
             "    fqdn: host.example.com\n"
             "    record_type: AAAA\n"
+            "    selection_policy: default\n"
+            "    enabled: true\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="family|record_type|Field required|Extra inputs"):
+        WorkspaceService().validate_workspace(workspace_dir)
+
+
+def test_validate_rejects_static_entry_without_matching_values(workspace_dir: Path) -> None:
+    (workspace_dir / "entries.yaml").write_text(
+        (
+            "config_version: 2\n"
+            "entries:\n"
+            "  - name: edge\n"
+            "    source_kind: static\n"
+            "    fqdn: edge.example.com\n"
+            "    family: both\n"
+            "    static_ipv6: 2408:8266:5003:506a::88\n"
+            "    enabled: true\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="static_ipv4 is required"):
+        WorkspaceService().validate_workspace(workspace_dir)
+
+
+def test_render_generates_effective_workspace_and_systemd_artifacts(workspace_dir: Path) -> None:
+    (workspace_dir / "entries.yaml").write_text(
+        (
+            "config_version: 2\n"
+            "entries:\n"
+            "  - name: web\n"
+            "    source_kind: lxc\n"
+            "    source_id: 101\n"
+            "    fqdn: host.example.com\n"
+            "    family: both\n"
             "    selection_policy: default\n"
             "    enabled: true\n"
         ),
@@ -94,6 +113,8 @@ def test_render_generates_effective_workspace_and_systemd_artifacts(workspace_di
 
     assert effective["workspace_name"] == "lab"
     assert "secret-token" not in json.dumps(effective)
+    assert len(desired["records"]) == 2
+    assert {record["record_type"] for record in desired["records"]} == {"A", "AAAA"}
     assert desired["records"][0]["entry_name"] == "web"
     assert "ExecStart=" in service_unit
     assert "OnUnitActiveSec=" in timer_unit

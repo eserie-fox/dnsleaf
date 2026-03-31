@@ -11,6 +11,8 @@ This repository intentionally stays narrow and predictable.
 - DNS providers never guess which IP should be published.
 - Workspace source files are the main user-maintained state.
 - Rendered artifacts and state files are generated outputs.
+- One entry may expand to two concrete record flows when `family=both`.
+- Static entries bypass discovery and selection.
 
 ## Configuration constraints
 
@@ -36,6 +38,6 @@ This repository intentionally stays narrow and predictable.
 ## Scope constraints
 
 - Provider scope is Cloudflare only.
-- Dynamic discovery currently supports the AAAA path only.
-- `A` remains reserved in schema for future expansion.
+- Dynamic discovery currently supports both IPv4 and IPv6.
+- Static entries support explicit IPv4, IPv6, and dual-stack values.
 - MCP is not implemented in this round, but the service layer is shaped to support it later.

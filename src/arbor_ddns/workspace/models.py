@@ -9,7 +9,8 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from arbor_ddns.dns.cloudflare import CloudflareProviderConfig
-from arbor_ddns.models import TargetKind, TargetRef
+from arbor_ddns.models import EntryAddressFamily, EntrySourceKind, IPAddressFamily, TargetRef
+from arbor_ddns.util.ip import normalize_ip
 
 WORKSPACE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 ENTRY_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -171,45 +172,38 @@ class WorkspaceEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    source_kind: TargetKind
-    source_id: int = Field(ge=1)
+    source_kind: EntrySourceKind
+    family: EntryAddressFamily
     fqdn: str
-    record_type: str
-    selection_policy: str
     enabled: bool
+    source_id: int | None = Field(default=None, ge=1)
+    selection_policy: str | None = None
     ttl: int | None = Field(default=None, ge=1)
     proxied: bool | None = None
     description: str | None = None
+    static_ipv4: str | None = None
+    static_ipv6: str | None = None
 
     @field_validator("name")
     @classmethod
     def _validate_entry_name(cls, value: str) -> str:
         return _validate_name(value, pattern=ENTRY_NAME_RE, field_name="entry name")
 
-    @field_validator("fqdn", "selection_policy")
+    @field_validator("fqdn")
     @classmethod
-    def _validate_non_empty(cls, value: str) -> str:
+    def _validate_fqdn(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError("value must not be blank")
+            raise ValueError("fqdn must not be blank")
         return stripped
 
-    @field_validator("record_type")
+    @field_validator("selection_policy")
     @classmethod
-    def _normalize_record_type(cls, value: str) -> str:
-        normalized = value.strip().upper()
-        if normalized not in {"A", "AAAA"}:
-            raise ValueError("record_type must be A or AAAA")
-        return normalized
-
-    @model_validator(mode="after")
-    def _validate_supported_record_type(self) -> Self:
-        if self.record_type == "A":
-            raise ValueError(
-                "record_type A is reserved for future expansion and is not supported in "
-                "workspace-managed discovery yet"
-            )
-        return self
+    def _normalize_selection_policy(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
     @field_validator("description")
     @classmethod
@@ -219,10 +213,48 @@ class WorkspaceEntry(BaseModel):
         stripped = value.strip()
         return stripped or None
 
+    @field_validator("static_ipv4", "static_ipv6")
+    @classmethod
+    def _normalize_static_ip(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return normalize_ip(stripped)
+
+    @model_validator(mode="after")
+    def _validate_source_shape(self) -> Self:
+        if self.source_kind is EntrySourceKind.STATIC:
+            if self.source_id is not None:
+                raise ValueError("static entries must not define source_id")
+            if self.selection_policy is not None:
+                raise ValueError("static entries must not define selection_policy")
+            if (
+                self.family in {EntryAddressFamily.IPV4, EntryAddressFamily.BOTH}
+                and self.static_ipv4 is None
+            ):
+                raise ValueError("static_ipv4 is required for static ipv4/both entries")
+            if (
+                self.family in {EntryAddressFamily.IPV6, EntryAddressFamily.BOTH}
+                and self.static_ipv6 is None
+            ):
+                raise ValueError("static_ipv6 is required for static ipv6/both entries")
+        else:
+            if self.source_id is None:
+                raise ValueError("dynamic lxc/vm entries require source_id")
+            if self.selection_policy is None:
+                raise ValueError("dynamic lxc/vm entries require selection_policy")
+            if self.static_ipv4 is not None or self.static_ipv6 is not None:
+                raise ValueError("dynamic lxc/vm entries must not define static IP values")
+        return self
+
     def to_target_ref(self) -> TargetRef:
         """Return the discovery target for this entry."""
 
-        return TargetRef(kind=self.source_kind, id=self.source_id)
+        if self.source_id is None:
+            raise ValueError("static entries do not have a discovery target")
+        return TargetRef(kind=self.source_kind.to_target_kind(), id=self.source_id)
 
     def effective_ttl(self, default_ttl: int) -> int:
         """Return the entry-specific TTL, or the workspace default."""
@@ -234,11 +266,38 @@ class WorkspaceEntry(BaseModel):
 
         return self.proxied if self.proxied is not None else default_proxied
 
-    @property
-    def descriptor(self) -> str:
+    def concrete_families(self) -> tuple[IPAddressFamily, ...]:
+        """Return the concrete record families managed by this entry."""
+
+        return self.family.concrete_families()
+
+    def descriptor_for_record_type(self, record_type: str) -> str:
         """Return the stable descriptor used in managed-record state."""
 
-        return f"{self.name}|{self.fqdn}|{self.record_type}"
+        return f"{self.name}|{self.fqdn}|{record_type}"
+
+    def descriptors(self) -> set[str]:
+        """Return all managed-record descriptors for this entry."""
+
+        return {
+            self.descriptor_for_record_type(family.record_type)
+            for family in self.concrete_families()
+        }
+
+    def static_value_for_family(self, family: IPAddressFamily) -> str | None:
+        """Return the static value configured for one family."""
+
+        if family is IPAddressFamily.IPV4:
+            return self.static_ipv4
+        return self.static_ipv6
+
+    @property
+    def source_descriptor(self) -> str:
+        """Return a compact source descriptor for logs and CLI output."""
+
+        if self.source_kind is EntrySourceKind.STATIC:
+            return "static"
+        return f"{self.source_kind.value}/{self.source_id}"
 
 
 class EntriesFile(BaseModel):
@@ -252,8 +311,8 @@ class EntriesFile(BaseModel):
     @field_validator("config_version")
     @classmethod
     def _validate_config_version(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("config_version must be >= 1")
+        if value != 2:
+            raise ValueError("entries config_version must be exactly 2")
         return value
 
     @model_validator(mode="after")
@@ -333,13 +392,16 @@ class DesiredRecordSpec(BaseModel):
     entry_name: str
     provider: str
     fqdn: str
+    family: IPAddressFamily
     record_type: str
     ttl: int
     proxied: bool
-    source_kind: TargetKind
-    source_id: int
-    selection_policy: str
+    source_kind: EntrySourceKind
+    source_id: int | None
+    selection_policy: str | None
     enabled: bool
+    value_source: Literal["dynamic", "static"]
+    static_value: str | None = None
     description: str | None = None
 
     @classmethod
@@ -348,22 +410,28 @@ class DesiredRecordSpec(BaseModel):
         *,
         workspace: ResolvedWorkspace,
         entry: WorkspaceEntry,
-    ) -> DesiredRecordSpec:
-        """Build a renderable desired-record spec for one entry."""
+    ) -> list[DesiredRecordSpec]:
+        """Build renderable desired-record specs for one entry."""
 
-        return cls(
-            entry_name=entry.name,
-            provider=workspace.provider,
-            fqdn=entry.fqdn,
-            record_type=entry.record_type,
-            ttl=entry.effective_ttl(workspace.default_ttl),
-            proxied=entry.effective_proxied(workspace.default_proxied),
-            source_kind=entry.source_kind,
-            source_id=entry.source_id,
-            selection_policy=entry.selection_policy,
-            enabled=entry.enabled,
-            description=entry.description,
-        )
+        return [
+            cls(
+                entry_name=entry.name,
+                provider=workspace.provider,
+                fqdn=entry.fqdn,
+                family=family,
+                record_type=family.record_type,
+                ttl=entry.effective_ttl(workspace.default_ttl),
+                proxied=entry.effective_proxied(workspace.default_proxied),
+                source_kind=entry.source_kind,
+                source_id=entry.source_id,
+                selection_policy=entry.selection_policy,
+                enabled=entry.enabled,
+                value_source="static" if entry.source_kind is EntrySourceKind.STATIC else "dynamic",
+                static_value=entry.static_value_for_family(family),
+                description=entry.description,
+            )
+            for family in entry.concrete_families()
+        ]
 
 
 class ValidationReport(BaseModel):

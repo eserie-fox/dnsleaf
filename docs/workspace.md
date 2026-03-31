@@ -53,13 +53,14 @@ Contains the user-maintained entry list.
 
 Each entry describes:
 
-- the guest source (`lxc` or `vm`)
-- the guest identifier
+- the source kind (`lxc`, `vm`, or `static`)
+- the guest identifier for dynamic entries
 - the target fqdn
-- the record type
-- the selection policy
+- the family intent: `ipv4`, `ipv6`, or `both`
+- the selection policy for dynamic entries
 - enable/disable state
 - optional ttl and proxied overrides
+- optional static IP values for static entries
 
 ## Command semantics
 
@@ -86,12 +87,14 @@ arbor-ddns apply
 - validates workspace and entry schema
 - resolves relative token-file paths
 - checks that the token file exists, is readable, and is non-empty
+- rejects old `record_type`-based entry files instead of auto-migrating them
 
 ### `render`
 
 - validates the workspace
 - writes rendered JSON artifacts
 - writes rendered systemd unit files
+- expands `family=both` into separate rendered `A` and `AAAA` desired-record specs
 - does not call Cloudflare
 - does not install systemd units
 

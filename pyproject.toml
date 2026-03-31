@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "arbor-ddns"
 version = "0.1.0"
-description = "Lightweight centralized IPv6 discovery and DNS AAAA synchronization for PVE guests."
+description = "Lightweight workspace-driven Cloudflare DDNS for PVE guests and static IP entries."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
