@@ -13,7 +13,7 @@ from arbor_ddns.config import AppConfig
 from arbor_ddns.dns.models import ProviderVerification
 from arbor_ddns.models import TargetKind, TargetRef
 from arbor_ddns.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
-from arbor_ddns.workspace import EntryService, WorkspaceService
+from arbor_ddns.workspace.entries import EntryService
 from arbor_ddns.workspace.models import (
     DoctorReport,
     RenderArtifacts,
@@ -21,6 +21,7 @@ from arbor_ddns.workspace.models import (
     WorkspaceStatus,
 )
 from arbor_ddns.workspace.service import ApplyReport
+from arbor_ddns.workspace.service import WorkspaceService
 
 app = typer.Typer(
     add_completion=False,

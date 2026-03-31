@@ -1,6 +1,3 @@
-"""Workspace-oriented services for arbor-ddns."""
+"""Workspace package."""
 
-from arbor_ddns.workspace.entries import EntryService
-from arbor_ddns.workspace.service import WorkspaceService
-
-__all__ = ["EntryService", "WorkspaceService"]
+__all__: list[str] = []
