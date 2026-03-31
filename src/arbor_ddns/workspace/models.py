@@ -537,6 +537,8 @@ class UninstallReport(BaseModel):
     service_unit_removed: bool = False
     timer_unit_removed: bool = False
     daemon_reloaded: bool = False
+    service_reset_failed: bool = False
+    timer_reset_failed: bool = False
     removed_paths: list[str] = Field(default_factory=list)
     kept_paths: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

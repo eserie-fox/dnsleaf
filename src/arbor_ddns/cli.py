@@ -586,6 +586,10 @@ def _format_uninstall_report(report: UninstallReport) -> None:
         f"timer_unit_removed={report.timer_unit_removed} "
         f"daemon_reloaded={report.daemon_reloaded}"
     )
+    typer.echo(
+        f"service_reset_failed={report.service_reset_failed} "
+        f"timer_reset_failed={report.timer_reset_failed}"
+    )
     for removed in report.removed_paths:
         typer.echo(f"removed={removed}")
     for kept in report.kept_paths:

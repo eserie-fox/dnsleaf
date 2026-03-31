@@ -126,6 +126,18 @@ class SystemdManager:
             check=check,
         )
 
+    def reset_failed(self, unit_name: str, unit_kind: str, *, check: bool = False) -> CommandResult:
+        """Clear retained failed state for one unit."""
+
+        return run_command(
+            [
+                self._app_config.systemd.systemctl_bin,
+                "reset-failed",
+                f"{unit_name}.{unit_kind}",
+            ],
+            check=check,
+        )
+
     def installed_unit_path(self, unit_name: str, unit_kind: str) -> Path:
         """Return the configured installed unit path for one unit."""
 

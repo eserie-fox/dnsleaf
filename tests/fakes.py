@@ -116,6 +116,7 @@ class FakeSystemdManager:
         self.stopped_services: list[str] = []
         self.stopped_timers: list[str] = []
         self.disabled_timers: list[str] = []
+        self.reset_failed_units: list[tuple[str, str]] = []
 
     def render_service_unit(self, workspace) -> str:
         return (
@@ -172,6 +173,15 @@ class FakeSystemdManager:
         self.disabled_timers.append(timer_name)
         return CommandResult(
             args=("systemctl", "disable", f"{timer_name}.timer"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def reset_failed(self, unit_name: str, unit_kind: str, *, check: bool = False) -> CommandResult:
+        self.reset_failed_units.append((unit_name, unit_kind))
+        return CommandResult(
+            args=("systemctl", "reset-failed", f"{unit_name}.{unit_kind}"),
             returncode=0,
             stdout="",
             stderr="",

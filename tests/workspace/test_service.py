@@ -36,6 +36,31 @@ def _service(tmp_path: Path, provider: FakeDNSProvider) -> WorkspaceService:
     )
 
 
+def _service_with_manager(
+    tmp_path: Path,
+    provider: FakeDNSProvider,
+) -> tuple[WorkspaceService, FakeSystemdManager]:
+    app_config = AppConfig.from_mapping({"systemd": {"unit_dir": str(tmp_path / "units")}})
+    storage = WorkspaceStorage(app_config)
+    systemd_manager = FakeSystemdManager(tmp_path / "units")
+    runner = SyncRunner(
+        app_config=app_config,
+        discovery_backends={
+            TargetKind.LXC.value: FakeDiscoveryBackend(),
+            TargetKind.VM.value: FakeDiscoveryBackend(),
+        },
+        provider_factory=lambda loaded: provider,
+    )
+    service = WorkspaceService(
+        app_config=app_config,
+        storage=storage,
+        systemd_manager=systemd_manager,
+        renderer=None,
+        runner=runner,
+    )
+    return service, systemd_manager
+
+
 def test_provider_verify_uses_workspace_provider(tmp_path: Path, monkeypatch) -> None:
     from tests.conftest import scaffold_workspace
 
@@ -203,7 +228,7 @@ def test_uninstall_removes_runtime_and_rendered_but_keeps_workspace_state(tmp_pa
         fqdn="host.example.com",
     )
     provider = FakeDNSProvider()
-    service = _service(tmp_path, provider)
+    service, systemd_manager = _service_with_manager(tmp_path, provider)
     service.render_workspace(workspace_dir)
     service.plan_workspace(workspace_dir)
     service.apply_workspace(workspace_dir, run_sync=False)
@@ -221,6 +246,10 @@ def test_uninstall_removes_runtime_and_rendered_but_keeps_workspace_state(tmp_pa
     assert (workspace_dir / "secrets").exists() is True
     assert (workspace_dir / "state").exists() is True
     assert report.manual_cleanup_hint == f"rm -rf {workspace_dir.resolve()}"
+    assert report.service_reset_failed is True
+    assert report.timer_reset_failed is True
+    assert ("arbor-ddns-lab", "service") in systemd_manager.reset_failed_units
+    assert ("arbor-ddns-lab", "timer") in systemd_manager.reset_failed_units
     assert provider.applied_actions == []
 
 

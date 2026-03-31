@@ -524,15 +524,42 @@ class WorkspaceService:
                     _systemctl_warning("daemon-reload", "systemd", daemon_reload)
                 )
 
+            service_reset = self._systemd_manager.reset_failed(
+                report.service_name,
+                "service",
+                check=False,
+            )
+            if service_reset.returncode == 0:
+                report.service_reset_failed = True
+            else:
+                report.warnings.append(
+                    _systemctl_warning("reset-failed", report.service_name, service_reset)
+                )
+
+            timer_reset = self._systemd_manager.reset_failed(
+                report.timer_name,
+                "timer",
+                check=False,
+            )
+            if timer_reset.returncode == 0:
+                report.timer_reset_failed = True
+            else:
+                report.warnings.append(
+                    _systemctl_warning("reset-failed", report.timer_name, timer_reset)
+                )
+
         logger.info(
             "systemd_cleanup service_stopped=%s timer_stopped=%s timer_disabled=%s "
-            "service_unit_removed=%s timer_unit_removed=%s daemon_reloaded=%s",
+            "service_unit_removed=%s timer_unit_removed=%s daemon_reloaded=%s "
+            "service_reset_failed=%s timer_reset_failed=%s",
             report.service_stopped,
             report.timer_stopped,
             report.timer_disabled,
             report.service_unit_removed,
             report.timer_unit_removed,
             report.daemon_reloaded,
+            report.service_reset_failed,
+            report.timer_reset_failed,
         )
         for warning in report.warnings:
             logger.warning("warning=%s", warning)

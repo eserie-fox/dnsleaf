@@ -92,6 +92,8 @@ class FakeWorkspaceService:
             service_unit_removed=True,
             timer_unit_removed=True,
             daemon_reloaded=True,
+            service_reset_failed=True,
+            timer_reset_failed=True,
             removed_paths=[str(workspace / "rendered"), str(workspace / "runtime")],
             kept_paths=[str(workspace / "workspace.yaml")],
             purged=purge,
@@ -247,6 +249,7 @@ def test_uninstall_command(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "service_stopped=True" in result.stdout
+    assert "service_reset_failed=True" in result.stdout
     assert "System installation artifacts have been removed." in result.stdout
 
 
