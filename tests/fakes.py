@@ -7,6 +7,7 @@ from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult
 from arbor_ddns.dns.base import DNSProvider
 from arbor_ddns.dns.models import DNSRecord, PlannedChange, ProviderVerification
 from arbor_ddns.models import TargetRef
+from arbor_ddns.util.process import CommandResult
 from arbor_ddns.workspace.models import SystemdUnitStatus
 from arbor_ddns.workspace.storage import WorkspacePaths
 
@@ -112,6 +113,9 @@ class FakeSystemdManager:
         self.daemon_reloaded = False
         self.enabled_timers: list[str] = []
         self.started_services: list[str] = []
+        self.stopped_services: list[str] = []
+        self.stopped_timers: list[str] = []
+        self.disabled_timers: list[str] = []
 
     def render_service_unit(self, workspace) -> str:
         return (
@@ -131,14 +135,57 @@ class FakeSystemdManager:
         self.installed_units.append((service_path, timer_path))
         return service_path, timer_path
 
-    def daemon_reload(self) -> None:
+    def daemon_reload(self, *, check: bool = True) -> CommandResult:
         self.daemon_reloaded = True
+        return CommandResult(
+            args=("systemctl", "daemon-reload"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
     def enable_restart_timer(self, timer_name: str) -> None:
         self.enabled_timers.append(timer_name)
 
     def start_service(self, service_name: str) -> None:
         self.started_services.append(service_name)
+
+    def stop_service(self, service_name: str, *, check: bool = False) -> CommandResult:
+        self.stopped_services.append(service_name)
+        return CommandResult(
+            args=("systemctl", "stop", f"{service_name}.service"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def stop_timer(self, timer_name: str, *, check: bool = False) -> CommandResult:
+        self.stopped_timers.append(timer_name)
+        return CommandResult(
+            args=("systemctl", "stop", f"{timer_name}.timer"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def disable_timer(self, timer_name: str, *, check: bool = False) -> CommandResult:
+        self.disabled_timers.append(timer_name)
+        return CommandResult(
+            args=("systemctl", "disable", f"{timer_name}.timer"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def installed_unit_path(self, unit_name: str, unit_kind: str) -> Path:
+        return self.unit_dir / f"{unit_name}.{unit_kind}"
+
+    def remove_installed_unit(self, unit_name: str, unit_kind: str) -> Path | None:
+        path = self.installed_unit_path(unit_name, unit_kind)
+        if not path.exists():
+            return None
+        path.unlink()
+        return path
 
     def status(self, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
         return SystemdUnitStatus(

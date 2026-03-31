@@ -19,6 +19,10 @@ Recommended layout:
     systemd/
       arbor-ddns-<workspace>.service
       arbor-ddns-<workspace>.timer
+  runtime/
+    logs/
+      arbor-ddns.log
+    run/
   state/
     last-apply.json
     managed-records.json
@@ -59,12 +63,22 @@ Each entry describes:
 
 ## Command semantics
 
+All workspace-aware commands default `--workspace` to the current directory. A common operator workflow is:
+
+```bash
+cd <workspace>
+arbor-ddns validate
+arbor-ddns plan
+arbor-ddns apply
+```
+
 ### `init`
 
 - creates the workspace directory if missing
 - allows an existing empty directory
 - rejects a non-empty directory
 - writes starter `workspace.yaml`, `entries.yaml`, and secret guidance
+- creates `rendered/`, `runtime/`, `runtime/logs/`, `runtime/run/`, and `state/`
 
 ### `validate`
 
@@ -90,12 +104,14 @@ Each entry describes:
 - enables and restarts the timer
 - records `last-apply.json`
 - optionally runs one immediate sync
+- never deletes remote Cloudflare records unless prune is explicitly enabled
 
 ### `status`
 
 - shows workspace metadata
 - shows entry counts
 - shows rendered artifact presence
+- shows runtime and log-file presence
 - shows managed-record counts
 - shows `last-apply.json`
 - shows service/timer status
@@ -103,4 +119,22 @@ Each entry describes:
 ### `doctor`
 
 - performs read-only workspace checks
-- reports missing files, token-file issues, command availability, and systemd writability
+- reports missing files, token-file issues, command availability, runtime/log writability, and systemd writability
+
+### `uninstall`
+
+- stops the workspace service and timer when possible
+- disables the timer
+- removes installed unit files
+- runs `daemon-reload`
+- removes generated `rendered/` and `runtime/`
+- keeps `workspace.yaml`, `entries.yaml`, `secrets/`, and `state/`
+- preserves `state/managed-records.json` and `state/last-apply.json` for later review or re-apply
+- never deletes remote Cloudflare records
+- prints a manual `rm -rf <workspace>` hint if you want to remove the workspace later
+
+### `uninstall --purge`
+
+- performs the normal uninstall flow
+- then removes the entire workspace directory
+- uses conservative path guards to avoid deleting broad or dangerous paths

@@ -30,6 +30,8 @@ This repository intentionally stays narrow and predictable.
 - Normal apply does not delete remote DNS records.
 - Prune only targets records previously tracked by the workspace state file.
 - If a tracked record cannot be deleted safely by `record_id`, it is skipped instead of guessed.
+- Default uninstall is local-only cleanup and never deletes remote DNS records.
+- Default uninstall keeps `state/` so managed-record ownership history survives reinstall.
 
 ## Scope constraints
 

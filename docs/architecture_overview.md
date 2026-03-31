@@ -34,7 +34,7 @@ More explicitly:
   - operates on resolved workspace entries
 - `arbor_ddns.systemd`
   - renders unit files
-  - installs and queries systemd units
+  - installs, uninstalls, and queries systemd units
 - `arbor_ddns.config`
   - app-level runtime defaults
   - not the main user editing surface
@@ -46,6 +46,7 @@ The primary editing surface is the workspace directory:
 - `workspace.yaml`: zone-level and instance-level settings
 - `entries.yaml`: managed entry list
 - `rendered/`: generated artifacts
+- `runtime/`: workspace-local logs and runtime files
 - `state/`: apply and managed-record tracking
 
 The older single inventory-style model is no longer the primary workflow.

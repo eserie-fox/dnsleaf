@@ -2,6 +2,8 @@
 
 Operators manage guest targets through `entries.yaml` and the `entry` CLI commands.
 
+All `entry` commands default `--workspace` to the current directory, so `cd <workspace>` is the normal operator path.
+
 ## Entry schema
 
 Each entry contains:
@@ -29,6 +31,7 @@ Current dynamic discovery only supports `AAAA`.
 
 ```bash
 uv run arbor-ddns entry list --workspace ./workspaces/example-zone
+cd ./workspaces/example-zone && uv run arbor-ddns entry list
 ```
 
 ### Add entries

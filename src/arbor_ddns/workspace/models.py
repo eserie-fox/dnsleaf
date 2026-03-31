@@ -484,6 +484,9 @@ class WorkspaceStatus(BaseModel):
     entry_count: int
     enabled_entry_count: int
     rendered_artifacts: dict[str, bool]
+    runtime_dir_exists: bool
+    runtime_log_file: str
+    runtime_log_file_exists: bool
     managed_active_count: int
     managed_stale_count: int
     last_apply: LastApplyState | None = None
@@ -516,3 +519,26 @@ class DoctorReport(BaseModel):
         """Return whether the report contains no error-level checks."""
 
         return all(check.status != "error" for check in self.checks)
+
+
+class UninstallReport(BaseModel):
+    """Workspace uninstall summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_root: str
+    workspace_name: str | None
+    service_name: str
+    timer_name: str
+    systemctl_available: bool
+    service_stopped: bool = False
+    timer_stopped: bool = False
+    timer_disabled: bool = False
+    service_unit_removed: bool = False
+    timer_unit_removed: bool = False
+    daemon_reloaded: bool = False
+    removed_paths: list[str] = Field(default_factory=list)
+    kept_paths: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    purged: bool = False
+    manual_cleanup_hint: str | None = None

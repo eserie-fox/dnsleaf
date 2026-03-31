@@ -17,6 +17,7 @@ from arbor_ddns.workspace.entries import EntryService
 from arbor_ddns.workspace.models import (
     DoctorReport,
     RenderArtifacts,
+    UninstallReport,
     ValidationReport,
     WorkspaceStatus,
 )
@@ -43,7 +44,12 @@ ConfigPathOption = Annotated[
 ]
 WorkspaceOption = Annotated[
     Path,
-    typer.Option("--workspace", "-w", help="Workspace directory."),
+    typer.Option(
+        Path("."),
+        "--workspace",
+        "-w",
+        help="Workspace directory. Defaults to the current directory.",
+    ),
 ]
 JsonOption = Annotated[
     bool,
@@ -154,6 +160,25 @@ def apply_command(
     _echo_model_or_text(report, json_output, _format_apply_report)
     if report.sync_report is not None and report.sync_report.has_errors():
         raise typer.Exit(code=1)
+
+
+@app.command("uninstall")
+def uninstall_command(
+    workspace: WorkspaceOption,
+    json_output: JsonOption = False,
+    purge: Annotated[
+        bool,
+        typer.Option("--purge", help="Delete the entire workspace directory after uninstall."),
+    ] = False,
+    config: ConfigPathOption = None,
+) -> None:
+    """Remove installed units and generated artifacts for a workspace."""
+
+    try:
+        report = _workspace_service(config).uninstall_workspace(workspace, purge=purge)
+    except Exception as exc:
+        _exit_with_error(exc, json_output=json_output)
+    _echo_model_or_text(report, json_output, _format_uninstall_report)
 
 
 @app.command("status")
@@ -527,6 +552,10 @@ def _format_status_report(report: WorkspaceStatus) -> None:
         f"entries={report.entry_count} enabled={report.enabled_entry_count}"
     )
     typer.echo(
+        f"runtime_exists={report.runtime_dir_exists} log_exists={report.runtime_log_file_exists}"
+    )
+    typer.echo(f"log_file={report.runtime_log_file}")
+    typer.echo(
         f"managed_active={report.managed_active_count} managed_stale={report.managed_stale_count}"
     )
     typer.echo(
@@ -542,6 +571,36 @@ def _format_status_report(report: WorkspaceStatus) -> None:
 def _format_doctor_report(report: DoctorReport) -> None:
     for check in report.checks:
         typer.echo(f"{check.status} name={check.name} message={check.message}")
+
+
+def _format_uninstall_report(report: UninstallReport) -> None:
+    typer.echo(
+        f"workspace={report.workspace_name} service={report.service_name} timer={report.timer_name} "
+        f"purged={report.purged}"
+    )
+    typer.echo(
+        f"service_stopped={report.service_stopped} timer_stopped={report.timer_stopped} "
+        f"timer_disabled={report.timer_disabled}"
+    )
+    typer.echo(
+        f"service_unit_removed={report.service_unit_removed} "
+        f"timer_unit_removed={report.timer_unit_removed} "
+        f"daemon_reloaded={report.daemon_reloaded}"
+    )
+    for removed in report.removed_paths:
+        typer.echo(f"removed={removed}")
+    for kept in report.kept_paths:
+        typer.echo(f"kept={kept}")
+    if report.manual_cleanup_hint is not None:
+        typer.echo("System installation artifacts have been removed.")
+        typer.echo(
+            f"Workspace configuration is still present in {report.workspace_root}."
+        )
+        typer.echo(
+            f"If you no longer need it, you can remove it manually with: {report.manual_cleanup_hint}"
+        )
+    for warning in report.warnings:
+        typer.echo(f"warning={warning}")
 
 
 def _format_provider_verification(report: ProviderVerification) -> None:

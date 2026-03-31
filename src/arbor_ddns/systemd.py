@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from arbor_ddns.config import AppConfig
-from arbor_ddns.util.process import CommandNotFoundError, command_available, run_command
+from arbor_ddns.util.process import (
+    CommandNotFoundError,
+    CommandResult,
+    command_available,
+    run_command,
+)
 from arbor_ddns.workspace.models import ResolvedWorkspace, SystemdUnitStatus
 from arbor_ddns.workspace.storage import WorkspacePaths
 
@@ -80,10 +85,10 @@ class SystemdManager:
         )
         return installed_service, installed_timer
 
-    def daemon_reload(self) -> None:
+    def daemon_reload(self, *, check: bool = True) -> CommandResult:
         """Run `systemctl daemon-reload`."""
 
-        run_command([self._app_config.systemd.systemctl_bin, "daemon-reload"])
+        return run_command([self._app_config.systemd.systemctl_bin, "daemon-reload"], check=check)
 
     def enable_restart_timer(self, timer_name: str) -> None:
         """Enable and restart the timer unit."""
@@ -96,6 +101,44 @@ class SystemdManager:
         """Start a oneshot service immediately."""
 
         run_command([self._app_config.systemd.systemctl_bin, "start", f"{service_name}.service"])
+
+    def stop_service(self, service_name: str, *, check: bool = False) -> CommandResult:
+        """Stop a oneshot service if present."""
+
+        return run_command(
+            [self._app_config.systemd.systemctl_bin, "stop", f"{service_name}.service"],
+            check=check,
+        )
+
+    def stop_timer(self, timer_name: str, *, check: bool = False) -> CommandResult:
+        """Stop a timer if present."""
+
+        return run_command(
+            [self._app_config.systemd.systemctl_bin, "stop", f"{timer_name}.timer"],
+            check=check,
+        )
+
+    def disable_timer(self, timer_name: str, *, check: bool = False) -> CommandResult:
+        """Disable a timer if present."""
+
+        return run_command(
+            [self._app_config.systemd.systemctl_bin, "disable", f"{timer_name}.timer"],
+            check=check,
+        )
+
+    def installed_unit_path(self, unit_name: str, unit_kind: str) -> Path:
+        """Return the configured installed unit path for one unit."""
+
+        return self._app_config.systemd.resolved_unit_dir() / f"{unit_name}.{unit_kind}"
+
+    def remove_installed_unit(self, unit_name: str, unit_kind: str) -> Path | None:
+        """Remove one installed unit file if present."""
+
+        path = self.installed_unit_path(unit_name, unit_kind)
+        if not path.exists():
+            return None
+        path.unlink()
+        return path
 
     def status(self, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
         """Return systemd status for one unit."""

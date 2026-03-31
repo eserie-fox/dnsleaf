@@ -1,6 +1,6 @@
 # Documentation Index
 
-`arbor-ddns` manages one workspace per DNS zone. The workspace is the user-facing source of truth, and the CLI follows the `init -> validate -> render -> apply -> status` workflow.
+`arbor-ddns` manages one workspace per DNS zone. The workspace is the user-facing source of truth, and the CLI follows the `init -> validate -> render -> apply -> status` workflow, with `uninstall` for local cleanup and `runtime/logs/arbor-ddns.log` for workspace-local logs.
 
 Documents:
 

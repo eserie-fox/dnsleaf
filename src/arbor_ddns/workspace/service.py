@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 from datetime import UTC, datetime
+from logging import LoggerAdapter
 from pathlib import Path
 from typing import Literal
 
@@ -13,7 +16,7 @@ from arbor_ddns.dns.cloudflare import CloudflareDNSProvider
 from arbor_ddns.dns.models import ProviderVerification
 from arbor_ddns.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
 from arbor_ddns.systemd import SystemdManager
-from arbor_ddns.util.process import command_available
+from arbor_ddns.util.process import CommandResult, command_available
 from arbor_ddns.workspace.models import (
     DoctorCheck,
     DoctorReport,
@@ -21,9 +24,11 @@ from arbor_ddns.workspace.models import (
     ManagedRecordFile,
     ManagedRecordSnapshot,
     RenderArtifacts,
+    UninstallReport,
     ValidationReport,
     WorkspaceStatus,
 )
+from arbor_ddns.workspace.runtime_logging import close_workspace_logger, workspace_command_logger
 from arbor_ddns.workspace.renderer import WorkspaceRenderer
 from arbor_ddns.workspace.state import (
     load_last_apply,
@@ -79,8 +84,8 @@ class WorkspaceService:
     def validate_workspace(self, workspace_dir: str | Path) -> ValidationReport:
         """Validate workspace source config and runtime-only references."""
 
-        loaded = self._storage.validate(workspace_dir)
-        return ValidationReport(
+        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="validate")
+        report = ValidationReport(
             workspace_root=str(loaded.paths.root),
             workspace_name=loaded.resolved_workspace.workspace_name,
             provider=loaded.resolved_workspace.provider,
@@ -90,12 +95,27 @@ class WorkspaceService:
             entry_count=len(loaded.entries_file.entries),
             enabled_entry_count=len(loaded.entries_file.enabled_entries()),
         )
+        logger.info(
+            "validated zone=%s entries=%d enabled=%d",
+            report.zone_name,
+            report.entry_count,
+            report.enabled_entry_count,
+        )
+        return report
 
     def render_workspace(self, workspace_dir: str | Path) -> RenderArtifacts:
         """Render workspace artifacts."""
 
-        loaded = self._storage.validate(workspace_dir)
-        return self._renderer.render(loaded)
+        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="render")
+        report = self._renderer.render(loaded)
+        logger.info(
+            "rendered effective_workspace=%s desired_records=%s service_unit=%s timer_unit=%s",
+            report.effective_workspace_file,
+            report.desired_records_file,
+            report.service_unit_file,
+            report.timer_unit_file,
+        )
+        return report
 
     def plan_workspace(
         self,
@@ -105,14 +125,20 @@ class WorkspaceService:
     ) -> WorkspaceRunReport:
         """Run a live dry-run plan for a workspace."""
 
-        loaded = self._storage.validate(workspace_dir)
+        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="plan")
         managed_state = load_managed_records(loaded.paths)
-        return self._runner.run(
-            loaded,
-            managed_state=managed_state,
-            apply=False,
-            prune_managed=self._resolve_prune_managed(loaded, prune_managed),
-        )
+        try:
+            report = self._runner.run(
+                loaded,
+                managed_state=managed_state,
+                apply=False,
+                prune_managed=self._resolve_prune_managed(loaded, prune_managed),
+            )
+        except Exception:
+            logger.exception("plan failed")
+            raise
+        self._log_run_report(logger, report)
+        return report
 
     def sync_once(
         self,
@@ -123,17 +149,24 @@ class WorkspaceService:
     ) -> WorkspaceRunReport:
         """Run one sync cycle for a workspace."""
 
-        loaded = self._storage.validate(workspace_dir)
+        command_name = "sync-once-apply" if apply else "sync-once"
+        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name=command_name)
         managed_state = load_managed_records(loaded.paths)
-        report = self._runner.run(
-            loaded,
-            managed_state=managed_state,
-            apply=apply,
-            prune_managed=self._resolve_prune_managed(loaded, prune_managed),
-        )
+        try:
+            report = self._runner.run(
+                loaded,
+                managed_state=managed_state,
+                apply=apply,
+                prune_managed=self._resolve_prune_managed(loaded, prune_managed),
+            )
+        except Exception:
+            logger.exception("sync run failed")
+            raise
         if apply:
             updated_state = self._reconcile_managed_state(loaded, managed_state, report)
             write_managed_records(loaded.paths, updated_state)
+            logger.info("managed_state_updated records=%d", len(updated_state.records))
+        self._log_run_report(logger, report)
         return report
 
     def apply_workspace(
@@ -145,7 +178,7 @@ class WorkspaceService:
     ) -> ApplyReport:
         """Validate, render, install/update systemd units, and optionally sync once."""
 
-        loaded = self._storage.validate(workspace_dir)
+        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="apply")
         render_report = self._renderer.render(loaded)
         installed_service, installed_timer = self._systemd_manager.install_rendered_units(
             loaded.paths,
@@ -153,6 +186,13 @@ class WorkspaceService:
         )
         self._systemd_manager.daemon_reload()
         self._systemd_manager.enable_restart_timer(loaded.resolved_workspace.systemd.timer_name)
+        logger.info(
+            "systemd_installed service=%s timer=%s service_unit=%s timer_unit=%s",
+            loaded.resolved_workspace.systemd.service_name,
+            loaded.resolved_workspace.systemd.timer_name,
+            installed_service,
+            installed_timer,
+        )
 
         immediate_sync_requested = (
             loaded.resolved_workspace.systemd.run_sync_after_apply
@@ -181,7 +221,7 @@ class WorkspaceService:
             ),
         )
 
-        return ApplyReport(
+        report = ApplyReport(
             workspace_root=str(loaded.paths.root),
             workspace_name=loaded.resolved_workspace.workspace_name,
             service_name=loaded.resolved_workspace.systemd.service_name,
@@ -194,13 +234,34 @@ class WorkspaceService:
             render=render_report,
             sync_report=sync_report,
         )
+        logger.info(
+            "apply_completed prune_managed=%s immediate_sync_requested=%s immediate_sync_ran=%s",
+            report.prune_managed,
+            report.immediate_sync_requested,
+            report.immediate_sync_ran,
+        )
+        return report
 
     def provider_verify(self, workspace_dir: str | Path) -> ProviderVerification:
         """Verify Cloudflare token, zone lookup, and DNS listing access."""
 
-        loaded = self._storage.validate(workspace_dir)
+        loaded, logger = self._load_workspace_with_logger(
+            workspace_dir,
+            command_name="provider-verify",
+        )
         provider = CloudflareDNSProvider(loaded.resolved_workspace.cloudflare_provider_config())
-        return provider.verify()
+        try:
+            report = provider.verify()
+        except Exception:
+            logger.exception("provider verification failed")
+            raise
+        logger.info(
+            "provider_verified zone_name=%s zone_id=%s record_listing_succeeded=%s",
+            report.zone_name,
+            report.zone_id,
+            report.record_listing_succeeded,
+        )
+        return report
 
     def status_workspace(self, workspace_dir: str | Path) -> WorkspaceStatus:
         """Aggregate workspace, state, and systemd status."""
@@ -251,6 +312,9 @@ class WorkspaceService:
                 "service_unit": (paths.rendered_systemd_dir / f"{service_name}.service").exists(),
                 "timer_unit": (paths.rendered_systemd_dir / f"{timer_name}.timer").exists(),
             },
+            runtime_dir_exists=paths.runtime_dir.exists(),
+            runtime_log_file=str(paths.runtime_log_file),
+            runtime_log_file_exists=paths.runtime_log_file.exists(),
             managed_active_count=active_count,
             managed_stale_count=stale_count,
             last_apply=last_apply,
@@ -334,12 +398,235 @@ class WorkspaceService:
             )
         )
 
+        checks.append(
+            DoctorCheck(
+                name="runtime_dir",
+                status="ok" if paths.runtime_dir.exists() else "warn",
+                message=f"runtime dir: {paths.runtime_dir}",
+            )
+        )
+        checks.append(
+            DoctorCheck(
+                name="runtime_logs_dir",
+                status="ok" if paths.runtime_logs_dir.exists() else "warn",
+                message=f"runtime logs dir: {paths.runtime_logs_dir}",
+            )
+        )
+        checks.append(
+            DoctorCheck(
+                name="runtime_log_target",
+                status="ok" if _path_write_target_available(paths.runtime_log_file) else "warn",
+                message=f"runtime log file: {paths.runtime_log_file}",
+            )
+        )
+
+        logger: LoggerAdapter | None = None
+        if paths.runtime_dir.exists():
+            logger = workspace_command_logger(
+                loaded.paths,
+                workspace_name=loaded.resolved_workspace.workspace_name,
+                command_name="doctor",
+            )
+        if logger is not None:
+            for check in checks:
+                if check.status != "ok":
+                    logger.warning(
+                        "doctor_check name=%s status=%s message=%s",
+                        check.name,
+                        check.status,
+                        check.message,
+                    )
+
         return DoctorReport(workspace_root=str(paths.root), checks=checks)
+
+    def uninstall_workspace(
+        self,
+        workspace_dir: str | Path,
+        *,
+        purge: bool = False,
+    ) -> UninstallReport:
+        """Remove installed units and generated runtime artifacts for a workspace."""
+
+        loaded = self._storage.load(workspace_dir)
+        if purge:
+            _assert_safe_delete_path(
+                loaded.paths.root,
+                workspace_root=loaded.paths.root,
+                allow_workspace_root=True,
+            )
+        logger = workspace_command_logger(
+            loaded.paths,
+            workspace_name=loaded.resolved_workspace.workspace_name,
+            command_name="uninstall",
+        )
+        report = UninstallReport(
+            workspace_root=str(loaded.paths.root),
+            workspace_name=loaded.resolved_workspace.workspace_name,
+            service_name=loaded.resolved_workspace.systemd.service_name,
+            timer_name=loaded.resolved_workspace.systemd.timer_name,
+            systemctl_available=self._systemd_manager.systemctl_available(),
+        )
+        logger.info("uninstall_started purge=%s", purge)
+
+        if report.systemctl_available:
+            service_stop = self._systemd_manager.stop_service(report.service_name, check=False)
+            if service_stop.returncode == 0:
+                report.service_stopped = True
+            else:
+                report.warnings.append(
+                    _systemctl_warning("stop service", report.service_name, service_stop)
+                )
+
+            timer_stop = self._systemd_manager.stop_timer(report.timer_name, check=False)
+            if timer_stop.returncode == 0:
+                report.timer_stopped = True
+            else:
+                report.warnings.append(
+                    _systemctl_warning("stop timer", report.timer_name, timer_stop)
+                )
+
+            timer_disable = self._systemd_manager.disable_timer(report.timer_name, check=False)
+            if timer_disable.returncode == 0:
+                report.timer_disabled = True
+            else:
+                report.warnings.append(
+                    _systemctl_warning("disable timer", report.timer_name, timer_disable)
+                )
+        else:
+            report.warnings.append("systemctl is not available; skipped stop/disable/daemon-reload")
+
+        removed_service = self._systemd_manager.remove_installed_unit(report.service_name, "service")
+        report.service_unit_removed = removed_service is not None
+        if removed_service is not None:
+            report.removed_paths.append(str(removed_service))
+        else:
+            report.warnings.append(
+                f"service unit already absent: "
+                f"{self._systemd_manager.installed_unit_path(report.service_name, 'service')}"
+            )
+
+        removed_timer = self._systemd_manager.remove_installed_unit(report.timer_name, "timer")
+        report.timer_unit_removed = removed_timer is not None
+        if removed_timer is not None:
+            report.removed_paths.append(str(removed_timer))
+        else:
+            report.warnings.append(
+                f"timer unit already absent: "
+                f"{self._systemd_manager.installed_unit_path(report.timer_name, 'timer')}"
+            )
+
+        if report.systemctl_available:
+            daemon_reload = self._systemd_manager.daemon_reload(check=False)
+            if daemon_reload.returncode == 0:
+                report.daemon_reloaded = True
+            else:
+                report.warnings.append(
+                    _systemctl_warning("daemon-reload", "systemd", daemon_reload)
+                )
+
+        logger.info(
+            "systemd_cleanup service_stopped=%s timer_stopped=%s timer_disabled=%s "
+            "service_unit_removed=%s timer_unit_removed=%s daemon_reloaded=%s",
+            report.service_stopped,
+            report.timer_stopped,
+            report.timer_disabled,
+            report.service_unit_removed,
+            report.timer_unit_removed,
+            report.daemon_reloaded,
+        )
+        for warning in report.warnings:
+            logger.warning("warning=%s", warning)
+
+        close_workspace_logger(logger)
+        _remove_workspace_path(loaded.paths.rendered_dir, report=report)
+        _remove_workspace_path(loaded.paths.runtime_dir, report=report)
+
+        if purge:
+            _remove_workspace_path(loaded.paths.root, report=report, allow_workspace_root=True)
+            report.purged = True
+            return report
+
+        report.kept_paths = [
+            str(path)
+            for path in (
+                loaded.paths.workspace_file,
+                loaded.paths.entries_file,
+                loaded.paths.secrets_dir,
+                loaded.paths.state_dir,
+            )
+            if path.exists()
+        ]
+        report.manual_cleanup_hint = f"rm -rf {loaded.paths.root}"
+        return report
 
     def _resolve_prune_managed(self, loaded: LoadedWorkspace, override: bool | None) -> bool:
         if override is None:
             return loaded.resolved_workspace.apply.prune_managed_records
         return override
+
+    def _load_workspace_with_logger(
+        self,
+        workspace_dir: str | Path,
+        *,
+        command_name: str,
+        runtime_validate: bool = True,
+    ) -> tuple[LoadedWorkspace, LoggerAdapter]:
+        loaded = self._storage.load(workspace_dir)
+        logger = workspace_command_logger(
+            loaded.paths,
+            workspace_name=loaded.resolved_workspace.workspace_name,
+            command_name=command_name,
+        )
+        logger.info("command_started workspace_root=%s", loaded.paths.root)
+        if runtime_validate:
+            try:
+                self._storage.validate_loaded(loaded)
+            except Exception:
+                logger.exception("runtime validation failed")
+                raise
+        return loaded, logger
+
+    def _log_run_report(self, logger: LoggerAdapter, report: WorkspaceRunReport) -> None:
+        logger.info(
+            "run_summary dry_run=%s entries=%d prune_candidates=%d warnings=%d",
+            report.dry_run,
+            len(report.entry_outcomes),
+            len(report.prune_outcomes),
+            len(report.warnings),
+        )
+        for outcome in report.entry_outcomes:
+            actions = "-"
+            if outcome.plan is not None:
+                actions = ",".join(change.action for change in outcome.plan.changes)
+            log_fn = logger.error if outcome.status == "error" else logger.info
+            log_fn(
+                "entry=%s fqdn=%s type=%s selection=%s selected=%s action=%s status=%s message=%s",
+                outcome.entry_name,
+                outcome.fqdn,
+                outcome.record_type,
+                outcome.selection_status,
+                outcome.selected_value or "-",
+                actions,
+                outcome.status,
+                outcome.message,
+            )
+        for outcome in report.prune_outcomes:
+            actions = "-"
+            if outcome.plan is not None:
+                actions = ",".join(change.action for change in outcome.plan.changes)
+            log_fn = logger.error if outcome.status == "error" else logger.info
+            log_fn(
+                "prune_entry=%s fqdn=%s type=%s record_id=%s action=%s status=%s message=%s",
+                outcome.entry_name,
+                outcome.fqdn,
+                outcome.record_type,
+                outcome.record_id or "-",
+                actions,
+                outcome.status,
+                outcome.message,
+            )
+        for warning in report.warnings:
+            logger.warning("warning=%s", warning)
 
     def _reconcile_managed_state(
         self,
@@ -391,6 +678,90 @@ class WorkspaceService:
                 if descriptor not in removed_descriptors
             ]
         )
+
+
+_DANGEROUS_DELETE_PATHS = {
+    Path("/"),
+    Path("/boot"),
+    Path("/dev"),
+    Path("/etc"),
+    Path("/home"),
+    Path("/lib"),
+    Path("/lib64"),
+    Path("/opt"),
+    Path("/proc"),
+    Path("/root"),
+    Path("/run"),
+    Path("/srv"),
+    Path("/sys"),
+    Path("/tmp"),
+    Path("/usr"),
+    Path("/var"),
+}
+
+
+def _remove_workspace_path(
+    path: Path,
+    *,
+    report: UninstallReport,
+    allow_workspace_root: bool = False,
+) -> None:
+    resolved = path.resolve()
+    if not resolved.exists():
+        return
+    _assert_safe_delete_path(
+        resolved,
+        workspace_root=Path(report.workspace_root),
+        allow_workspace_root=allow_workspace_root,
+    )
+    if resolved.is_dir() and not resolved.is_symlink():
+        shutil.rmtree(resolved)
+    else:
+        resolved.unlink()
+    report.removed_paths.append(str(resolved))
+
+
+def _assert_safe_delete_path(
+    path: Path,
+    *,
+    workspace_root: Path | None = None,
+    allow_workspace_root: bool = False,
+) -> None:
+    resolved = path.resolve()
+    if resolved in _DANGEROUS_DELETE_PATHS:
+        raise ValueError(f"refusing to delete dangerous path: {resolved}")
+    if len(resolved.parts) <= 2:
+        raise ValueError(f"refusing to delete overly broad path: {resolved}")
+    if resolved == resolved.parent:
+        raise ValueError(f"refusing to delete filesystem root: {resolved}")
+
+    if workspace_root is None:
+        return
+    root = workspace_root.resolve()
+    if resolved == root:
+        if allow_workspace_root:
+            return
+        raise ValueError(f"refusing to delete workspace root without explicit purge: {resolved}")
+    if not _is_relative_to(resolved, root):
+        raise ValueError(f"refusing to delete path outside workspace root: {resolved}")
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _path_write_target_available(path: Path) -> bool:
+    target = path if path.exists() else path.parent
+    return target.exists() and target.is_dir() and os.access(target, os.W_OK)
+
+
+def _systemctl_warning(action: str, unit_name: str, result: CommandResult) -> str:
+    detail = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+    return f"could not {action} for {unit_name}: {detail}"
 
 
 def _utc_now() -> str:

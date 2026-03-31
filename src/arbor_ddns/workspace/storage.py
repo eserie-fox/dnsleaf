@@ -75,6 +75,22 @@ class WorkspacePaths:
         return self.rendered_dir / "systemd"
 
     @property
+    def runtime_dir(self) -> Path:
+        return self.root / "runtime"
+
+    @property
+    def runtime_logs_dir(self) -> Path:
+        return self.runtime_dir / "logs"
+
+    @property
+    def runtime_run_dir(self) -> Path:
+        return self.runtime_dir / "run"
+
+    @property
+    def runtime_log_file(self) -> Path:
+        return self.runtime_logs_dir / "arbor-ddns.log"
+
+    @property
     def state_dir(self) -> Path:
         return self.root / "state"
 
@@ -132,6 +148,8 @@ class WorkspaceStorage:
 
         paths.secrets_dir.mkdir(parents=True, exist_ok=True)
         paths.rendered_systemd_dir.mkdir(parents=True, exist_ok=True)
+        paths.runtime_logs_dir.mkdir(parents=True, exist_ok=True)
+        paths.runtime_run_dir.mkdir(parents=True, exist_ok=True)
         paths.state_dir.mkdir(parents=True, exist_ok=True)
 
         scaffold = self._app_config.workspace_scaffold
@@ -197,6 +215,11 @@ class WorkspaceStorage:
         """Load a workspace and validate runtime-resolved references."""
 
         loaded = self.load(workspace_dir)
+        return self.validate_loaded(loaded)
+
+    def validate_loaded(self, loaded: LoadedWorkspace) -> LoadedWorkspace:
+        """Validate runtime-resolved references for a previously loaded workspace."""
+
         provider_config = loaded.resolved_workspace.cloudflare_provider_config()
         provider_config.resolved_api_token()
         return loaded

@@ -19,6 +19,8 @@ def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
     assert (workspace / "entries.yaml").exists()
     assert (workspace / "secrets" / "README.txt").exists()
     assert (workspace / "rendered" / "systemd").is_dir()
+    assert (workspace / "runtime" / "logs").is_dir()
+    assert (workspace / "runtime" / "run").is_dir()
     assert (workspace / "state" / "managed-records.json").exists()
 
 
