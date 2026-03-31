@@ -1,4 +1,4 @@
-"""Planner for desired AAAA state versus current provider state."""
+"""Planner for desired DNS state versus current provider state."""
 
 from __future__ import annotations
 
@@ -68,7 +68,9 @@ def plan_dns_changes(
     exact_matches = [
         record
         for record in current_records
-        if record.value == desired_record.value and record.ttl == desired_record.ttl
+        if record.value == desired_record.value
+        and record.ttl == desired_record.ttl
+        and record.proxied == desired_record.proxied
     ]
     if exact_matches and len(current_records) == 1:
         return SyncPlan(

@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .venv
+.uvenv
 env/
 venv/
 ENV/
@@ -219,3 +220,4 @@ __marimo__/
 .agents/
 .codex
 skills-lock.json
+config/

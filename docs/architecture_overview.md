@@ -1,46 +1,59 @@
 # Architecture Overview
 
-`arbor-ddns` 按三层结构组织，而不是将发现、选择、同步混在一起：
+## Core flow
 
-1. `inventory`
-   - 提供目标列表
-   - 每个条目至少描述 `kind`、`id`、`fqdn`、`provider`、`selection_policy`、`enabled`
+The runtime flow is:
 
-2. `discovery`
-   - 从 PVE 采集 IPv6 候选地址
-   - 当前包含：
-     - `pve_lxc.py`: `pct exec <ctid> -- ...`
-     - `pve_qga.py`: `qm agent <vmid> network-get-interfaces`
-   - 只返回候选地址，不写 DNS，也不在 backend 内拍脑袋决定最终地址
+`workspace source -> discovery -> selection -> planner -> apply/state`
 
-3. `selection`
-   - 位于 `discovery/selectors.py`
-   - 对候选地址做归一化、过滤、优先级判断与歧义处理
-   - 输出 `SelectionResult`
+More explicitly:
 
-4. `dns`
-   - `dns/base.py` 定义 provider 接口
-   - `dns/planner.py` 对比 `desired` 与 `current`
-   - 输出 `create / update / delete / noop`
+1. `workspace.yaml` and `entries.yaml` are loaded from a workspace directory.
+2. Discovery backends gather IPv6 candidates from PVE.
+3. The selector chooses one IPv6 address or returns an explicit non-selection result.
+4. Cloudflare current state is queried.
+5. The planner decides `create`, `update`, `delete`, or `noop`.
+6. Optional apply mutates Cloudflare state and updates workspace state files.
 
-5. `sync`
-   - `sync/runner.py` 串起：
-     - inventory
-     - discovery
-     - selection
-     - current DNS lookup
-     - planner
-     - apply
+## Module boundaries
 
-主流程：
+- `arbor_ddns.workspace`
+  - loads and validates workspace source files
+  - manages entry CRUD
+  - renders derived artifacts
+  - aggregates status and doctor output
+- `arbor_ddns.discovery`
+  - collects IPv6 candidate addresses from PVE
+  - contains address-selection logic
+  - never calls DNS APIs
+- `arbor_ddns.dns`
+  - contains the Cloudflare provider and the generic planner
+  - never decides which guest IP is better
+- `arbor_ddns.sync`
+  - performs thin orchestration for plan and sync-once
+  - operates on resolved workspace entries
+- `arbor_ddns.systemd`
+  - renders unit files
+  - installs and queries systemd units
+- `arbor_ddns.config`
+  - app-level runtime defaults
+  - not the main user editing surface
 
-`inventory -> discovery -> selection -> planner -> apply`
+## Workspace as the source of truth
 
-边界约束：
+The primary editing surface is the workspace directory:
 
-- CLI 只做入口与输出
-- runner 负责 orchestration，但保持薄
-- discovery 不写 DNS
-- DNS provider 不负责地址选择
-- selector 不关心 provider 细节
+- `workspace.yaml`: zone-level and instance-level settings
+- `entries.yaml`: managed entry list
+- `rendered/`: generated artifacts
+- `state/`: apply and managed-record tracking
 
+The older single inventory-style model is no longer the primary workflow.
+
+## Cloudflare-only scope
+
+The current implementation supports Cloudflare only. Provider abstractions remain clean, but user-facing docs and commands intentionally describe only the Cloudflare path.
+
+## Future expansion
+
+The workspace and entry services are designed so that future MCP or other machine-oriented integrations can call them directly without scraping CLI text output.

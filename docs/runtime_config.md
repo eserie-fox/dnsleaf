@@ -1,53 +1,67 @@
 # Runtime Config
 
-`arbor-ddns` 使用轻量的 formal runtime config 模式，但不依赖 pylon。
+`arbor-ddns` has two configuration layers:
 
-## Defaults
+1. app runtime config
+2. workspace source config
 
-默认配置文件位于包资源中：
+This document describes the app runtime config.
+
+## App runtime config
+
+The app runtime config exists for program defaults such as:
+
+- discovery command locations
+- systemd installation defaults
+- workspace scaffold defaults
+
+It is not the main user editing surface for day-to-day management.
+
+## Formal runtime config pattern
+
+The app runtime config follows this fixed pattern:
+
+1. read package defaults
+2. read override mapping or JSON file
+3. deep merge
+4. validate with Pydantic v2
+
+Public loaders:
+
+- `AppConfig.from_defaults()`
+- `AppConfig.from_file(path)`
+- `AppConfig.from_mapping(data)`
+
+## Package defaults
+
+Defaults are shipped inside the package:
 
 - `src/arbor_ddns/config_defaults/app.json`
 
-这保证默认配置跟随包一起分发，而不是依赖宿主机目录结构。
+This keeps install-time behavior deterministic and avoids host-specific assumptions.
 
-## 加载 API
+## Deep merge rules
 
-`AppConfig` 提供三个固定入口：
+The merge helper is intentionally simple:
 
-- `from_defaults()`
-- `from_file(path)`
-- `from_mapping(data)`
+- mapping + mapping: recursive merge
+- any other type pair: override replaces base completely
+- lists are replaced, never concatenated
 
-## 固定流程
+## Runtime-only resolution
 
-配置加载流程严格固定为：
+Runtime resolution is not done during raw loading.
 
-1. 读取 package defaults
-2. 读取 override
-3. deep merge
-4. `model_validate`
+Examples:
 
-deep merge 规则：
+- resolving the systemd unit directory path
+- resolving workspace-relative token-file paths
+- reading the Cloudflare token contents
 
-- `mapping + mapping`: 递归合并
-- 其他类型：override 完全替换 base
-- 不做列表拼接
-- 不做隐式魔法
+Those steps happen explicitly at runtime, after the raw config object has already been validated.
 
-## Raw Config 与 Runtime Resolve 分离
+## Relationship to workspace config
 
-配置加载阶段只处理：
+Workspace config lives in YAML inside the workspace directory and is the normal operator-facing surface.
 
-- defaults 读取
-- override 读取
-- merge
-- validate
-
-不在这个阶段做：
-
-- 路径展开
-- 环境变量替换
-- 运行期依赖解析
-
-运行期解析必须通过显式方法完成，而不是在加载时偷偷发生。
-
+See [Workspace](workspace.md) for the user-facing config model.

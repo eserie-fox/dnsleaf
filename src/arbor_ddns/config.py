@@ -1,4 +1,4 @@
-"""Formal runtime configuration for arbor_ddns."""
+"""Formal runtime configuration for arbor-ddns."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from arbor_ddns.inventory import Inventory
 from arbor_ddns.util.json_merge import deep_merge
 
 DEFAULTS_RESOURCE = files("arbor_ddns").joinpath("config_defaults/app.json")
@@ -26,54 +25,102 @@ class DiscoveryCommandSettings(BaseModel):
     shell_bin: str
 
 
-class DNSSettings(BaseModel):
-    """Global DNS synchronization settings."""
+class SystemdSettings(BaseModel):
+    """systemd installation defaults."""
 
     model_config = ConfigDict(extra="forbid")
 
-    default_ttl: int = Field(ge=1)
+    systemctl_bin: str
+    unit_dir: str
+
+    @field_validator("systemctl_bin", "unit_dir")
+    @classmethod
+    def _validate_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("value must not be blank")
+        return stripped
+
+    def resolved_unit_dir(self) -> Path:
+        """Return the configured systemd unit directory."""
+
+        return Path(self.unit_dir).expanduser()
 
 
-class AliDNSProviderConfig(BaseModel):
-    """AliDNS provider raw configuration."""
+class WorkspaceScaffoldSystemdSettings(BaseModel):
+    """Default systemd values used when scaffolding workspaces."""
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool
-    access_key_id: str | None
-    access_key_secret: str | None
-    region_id: str | None
+    on_boot_sec: str
+    on_unit_active_sec: str
+    run_sync_after_apply: bool
+
+    @field_validator("on_boot_sec", "on_unit_active_sec")
+    @classmethod
+    def _validate_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("value must not be blank")
+        return stripped
 
 
-class CloudflareProviderConfig(BaseModel):
-    """Cloudflare provider raw configuration."""
+class WorkspaceScaffoldApplySettings(BaseModel):
+    """Default apply behavior used when scaffolding workspaces."""
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool
-    api_token: str | None
+    prune_managed_records: bool
+
+
+class WorkspaceScaffoldSettings(BaseModel):
+    """Starter workspace values written by `arbor-ddns init`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    config_version: int
+    provider: str
+    zone_name: str
     zone_id: str | None
+    api_token_file: str
+    default_ttl: int = Field(ge=1)
+    default_proxied: bool
+    systemd: WorkspaceScaffoldSystemdSettings
+    apply: WorkspaceScaffoldApplySettings
 
+    @field_validator("config_version")
+    @classmethod
+    def _validate_version(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("config_version must be >= 1")
+        return value
 
-class ProviderSettings(BaseModel):
-    """Provider configuration section."""
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, value: str) -> str:
+        stripped = value.strip()
+        if stripped != "cloudflare":
+            raise ValueError("only the cloudflare DNS provider is supported")
+        return stripped
 
-    model_config = ConfigDict(extra="forbid")
-
-    alidns: AliDNSProviderConfig
-    cloudflare: CloudflareProviderConfig
+    @field_validator("zone_name", "api_token_file")
+    @classmethod
+    def _validate_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("value must not be blank")
+        return stripped
 
 
 class AppConfig(BaseModel):
-    """Application configuration."""
+    """Application runtime defaults."""
 
     model_config = ConfigDict(extra="forbid")
 
     config_version: int
     discovery: DiscoveryCommandSettings
-    dns: DNSSettings
-    providers: ProviderSettings
-    inventory: Inventory
+    systemd: SystemdSettings
+    workspace_scaffold: WorkspaceScaffoldSettings
 
     @field_validator("config_version")
     @classmethod
@@ -106,18 +153,6 @@ class AppConfig(BaseModel):
 
         merged = deep_merge(_read_defaults_mapping(), dict(data))
         return cls.model_validate(merged)
-
-    def provider_config(
-        self,
-        provider_name: str,
-    ) -> AliDNSProviderConfig | CloudflareProviderConfig:
-        """Return provider-specific raw config by name."""
-
-        if provider_name == "alidns":
-            return self.providers.alidns
-        if provider_name == "cloudflare":
-            return self.providers.cloudflare
-        raise KeyError(f"unknown provider: {provider_name}")
 
 
 def _read_defaults_mapping() -> dict[str, Any]:

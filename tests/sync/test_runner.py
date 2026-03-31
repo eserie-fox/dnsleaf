@@ -1,81 +1,132 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider
+
 from arbor_ddns.config import AppConfig
-from arbor_ddns.discovery.base import DiscoveryBackend
-from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult
-from arbor_ddns.dns.base import DNSProvider
-from arbor_ddns.dns.models import DNSRecord, PlannedChange
-from arbor_ddns.models import TargetKind, TargetRef
+from arbor_ddns.dns.models import DNSRecord
+from arbor_ddns.models import TargetKind
 from arbor_ddns.sync.runner import SyncRunner
+from arbor_ddns.workspace.models import ManagedRecordFile
+from arbor_ddns.workspace.storage import WorkspaceStorage
 
 
-class FakeDiscoveryBackend(DiscoveryBackend):
-    name = "fake_discovery"
-
-    def discover(self, target: TargetRef) -> DiscoveryResult:
-        return DiscoveryResult(
-            target=target,
-            backend=self.name,
-            candidates=[
-                AddressCandidate(
-                    interface="eth0",
-                    address="2408:8266:5003:506a::3d6",
-                    prefix_length=128,
-                    source=self.name,
-                )
-            ],
-        )
-
-
-class FakeDNSProvider(DNSProvider):
-    name = "cloudflare"
-
-    def __init__(self) -> None:
-        self.applied_actions: list[str] = []
-
-    def list_records(self, fqdn: str, record_type: str = "AAAA") -> list[DNSRecord]:
-        del fqdn, record_type
-        return []
-
-    def apply_change(self, change: PlannedChange) -> DNSRecord | None:
-        self.applied_actions.append(change.action)
-        return None
-
-
-def test_runner_plans_and_applies_sync() -> None:
-    config = AppConfig.from_mapping(
+def _app_config(tmp_path: Path) -> AppConfig:
+    return AppConfig.from_mapping(
         {
-            "inventory": {
-                "entries": [
-                    {
-                        "kind": "lxc",
-                        "id": 101,
-                        "fqdn": "host.example.com",
-                        "provider": "cloudflare",
-                        "selection_policy": "default",
-                        "enabled": True,
-                    }
-                ]
+            "systemd": {
+                "unit_dir": str(tmp_path / "units"),
             }
         }
     )
-    provider = FakeDNSProvider()
-    runner = SyncRunner(
-        config=config,
+
+
+def _prepare_loaded_workspace(tmp_path: Path):
+    from tests.conftest import scaffold_workspace
+
+    workspace_dir = scaffold_workspace(tmp_path)
+    storage = WorkspaceStorage(_app_config(tmp_path))
+    (workspace_dir / "entries.yaml").write_text(
+        (
+            "config_version: 1\n"
+            "entries:\n"
+            "  - name: web\n"
+            "    source_kind: lxc\n"
+            "    source_id: 101\n"
+            "    fqdn: host.example.com\n"
+            "    record_type: AAAA\n"
+            "    selection_policy: default\n"
+            "    enabled: true\n"
+        ),
+        encoding="utf-8",
+    )
+    return storage.validate(workspace_dir), storage
+
+
+def _build_runner(tmp_path: Path, provider: FakeDNSProvider) -> SyncRunner:
+    app_config = _app_config(tmp_path)
+    return SyncRunner(
+        app_config=app_config,
         discovery_backends={
             TargetKind.LXC.value: FakeDiscoveryBackend(),
             TargetKind.VM.value: FakeDiscoveryBackend(),
         },
-        provider_factory=lambda provider_name: provider,
+        provider_factory=lambda loaded: provider,
     )
 
-    plan_report = runner.plan_inventory()
-    apply_report = runner.sync_once(apply=True)
 
-    assert len(plan_report.outcomes) == 1
-    assert plan_report.outcomes[0].plan is not None
-    assert [change.action for change in plan_report.outcomes[0].plan.changes] == ["create"]
-    assert len(apply_report.outcomes) == 1
-    assert apply_report.outcomes[0].applied is True
+def test_runner_dry_run_does_not_apply_changes(tmp_path: Path) -> None:
+    loaded, _storage = _prepare_loaded_workspace(tmp_path)
+    provider = FakeDNSProvider()
+    runner = _build_runner(tmp_path, provider)
+
+    report = runner.run(
+        loaded,
+        managed_state=ManagedRecordFile(),
+        apply=False,
+        prune_managed=False,
+    )
+
+    assert len(report.entry_outcomes) == 1
+    assert report.entry_outcomes[0].plan is not None
+    assert [change.action for change in report.entry_outcomes[0].plan.changes] == ["create"]
+    assert provider.applied_actions == []
+
+
+def test_runner_apply_calls_provider(tmp_path: Path) -> None:
+    loaded, _storage = _prepare_loaded_workspace(tmp_path)
+    provider = FakeDNSProvider()
+    runner = _build_runner(tmp_path, provider)
+
+    report = runner.run(
+        loaded,
+        managed_state=ManagedRecordFile(),
+        apply=True,
+        prune_managed=False,
+    )
+
+    assert len(report.entry_outcomes) == 1
+    assert report.entry_outcomes[0].applied is True
+    assert report.entry_outcomes[0].final_record is not None
     assert provider.applied_actions == ["create"]
 
+
+def test_runner_plans_prune_for_tracked_stale_record(tmp_path: Path) -> None:
+    loaded, _storage = _prepare_loaded_workspace(tmp_path)
+    stale_record = DNSRecord(
+        provider="cloudflare",
+        fqdn="old.example.com",
+        record_type="AAAA",
+        value="2408:8266:5003:506a::88",
+        ttl=120,
+        proxied=False,
+        record_id="rec-stale",
+    )
+    provider = FakeDNSProvider(initial_records=[stale_record])
+    runner = _build_runner(tmp_path, provider)
+    managed_state = ManagedRecordFile.model_validate(
+        {
+            "records": [
+                {
+                    "workspace_name": "lab",
+                    "entry_name": "removed",
+                    "fqdn": "old.example.com",
+                    "record_type": "AAAA",
+                    "record_id": "rec-stale",
+                    "value": "2408:8266:5003:506a::88",
+                    "ttl": 120,
+                    "proxied": False,
+                    "state": "stale",
+                    "first_managed_at": "2026-01-01T00:00:00+00:00",
+                    "last_seen_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
+        }
+    )
+
+    report = runner.run(loaded, managed_state=managed_state, apply=False, prune_managed=True)
+
+    assert len(report.prune_outcomes) == 1
+    assert report.prune_outcomes[0].plan is not None
+    assert [change.action for change in report.prune_outcomes[0].plan.changes] == ["delete"]

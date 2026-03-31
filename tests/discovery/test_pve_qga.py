@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 
 from arbor_ddns.discovery.pve_qga import PVEQGADiscoveryBackend
 from arbor_ddns.models import TargetKind, TargetRef
@@ -29,7 +30,7 @@ def test_pve_qga_backend_parses_network_interfaces() -> None:
         ]
     }
 
-    def fake_runner(args):
+    def fake_runner(args: Sequence[str]) -> CommandResult:
         assert args == ["qm", "agent", "201", "network-get-interfaces"]
         return CommandResult(args=tuple(args), returncode=0, stdout=json.dumps(payload), stderr="")
 

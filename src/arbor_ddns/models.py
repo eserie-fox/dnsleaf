@@ -26,7 +26,7 @@ class TargetRef(BaseModel):
 
 
 class InventoryEntry(BaseModel):
-    """A single sync target definition."""
+    """Legacy inventory entry kept for compatibility with older tests."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -37,12 +37,20 @@ class InventoryEntry(BaseModel):
     selection_policy: str
     enabled: bool
 
-    @field_validator("fqdn", "provider", "selection_policy")
+    @field_validator("fqdn", "selection_policy")
     @classmethod
     def _validate_non_empty(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
             raise ValueError("value must not be blank")
+        return stripped
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, value: str) -> str:
+        stripped = value.strip()
+        if stripped != "cloudflare":
+            raise ValueError("inventory entries must use the cloudflare provider")
         return stripped
 
     def to_target_ref(self) -> TargetRef:

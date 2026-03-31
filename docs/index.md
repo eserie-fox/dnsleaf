@@ -1,19 +1,14 @@
-# arbor-ddns Docs
+# Documentation Index
 
-`arbor-ddns` 是一个中心化 IPv6 发现与 DNS AAAA 同步工具，面向 PVE 宿主环境中的指定 LXC 与 Linux VM。
+`arbor-ddns` manages one workspace per DNS zone. The workspace is the user-facing source of truth, and the CLI follows the `init -> validate -> render -> apply -> status` workflow.
 
-文档导航：
+Documents:
 
-- [架构总览](architecture_overview.md)
-- [开发约束](development_constraints.md)
-- [运行期配置](runtime_config.md)
-- [地址发现与选择](discovery.md)
-- [DNS 同步](dns_sync.md)
-
-项目目标：
-
-- 从 PVE 目标中发现 IPv6 候选地址
-- 用明确、可测试的策略选出一个 DNS AAAA 目标地址
-- 将目标地址同步到 DNS provider
-- 保持 CLI、runner、provider、selector 之间的边界清晰
-
+- [Architecture Overview](architecture_overview.md)
+- [Runtime Config](runtime_config.md)
+- [Workspace](workspace.md)
+- [Entry Management](entry_management.md)
+- [Discovery](discovery.md)
+- [DNS Sync](dns_sync.md)
+- [systemd Integration](systemd_integration.md)
+- [Development Constraints](development_constraints.md)

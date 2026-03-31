@@ -1,57 +1,50 @@
 # Discovery
 
-## Backends
+Discovery is responsible for gathering candidate addresses from PVE guests. It never writes DNS state directly.
 
-当前 discovery 域包含两个 backend：
+## LXC backend
 
-- `pve_lxc.py`
-  - 通过 `pct exec <ctid> -- sh -lc "ip -6 -o addr show"` 采集地址
-  - 解析文本输出为 `AddressCandidate`
+The LXC backend runs:
 
-- `pve_qga.py`
-  - 通过 `qm agent <vmid> network-get-interfaces` 采集地址
-  - 解析 JSON 输出为 `AddressCandidate`
+```text
+pct exec <ctid> -- sh -lc "ip -6 -o addr show"
+```
 
-backend 责任只有一个：
+The output is parsed into normalized IPv6 candidates with:
 
-- 产出候选地址
+- interface
+- address
+- prefix length
+- source backend
+- optional scope
+- optional flags
 
-backend 不负责：
+## VM backend
 
-- 选择最终地址
-- 写 DNS
+The VM backend runs:
 
-## Candidate Model
+```text
+qm agent <vmid> network-get-interfaces
+```
 
-`AddressCandidate` 至少包含：
+It reads the QEMU guest agent JSON and extracts IPv6 address candidates from the interface list.
 
-- `interface`
-- `address`
-- `prefix_length`
-- `source`
-- `scope`
-- `flags`
+## Selection rules
 
-这让 selector 与日志层能保留足够的排障信息。
+The default selector:
 
-## Default Selector Rules
+- rejects loopback
+- rejects link-local
+- rejects ULA
+- rejects other non-global IPv6 addresses
+- prefers a single `/128`
+- otherwise prefers a single stable candidate
+- refuses to guess when multiple equally plausible candidates remain
 
-默认 selector 位于 `discovery/selectors.py`，规则为：
+The selection result keeps:
 
-1. 排除 loopback `::1`
-2. 排除 link-local `fe80::/10`
-3. 排除 ULA `fc00::/7`
-4. 只保留全局 IPv6
-5. 多个可用地址同时存在时：
-   - 优先 `/128`
-   - 若没有 `/128`，优先稳定地址
-   - 明显 temporary/privacy 风格地址只做降级，不盲选
-   - 仍然无法可靠决策时返回 `ambiguous`
+- filtered candidates and reasons
+- usable but non-selected candidates
+- final status and reason
 
-## Failure and Ambiguity Semantics
-
-- backend 调用失败：`DiscoveryResult.error` 非空
-- 过滤后无可用地址：`SelectionResult.status = no_candidate`
-- 存在多个同优先级候选：`SelectionResult.status = ambiguous`
-- 被过滤和未选中的候选都会保留原因，便于日志与排障
-
+This makes logs and diagnostics more useful when selection is ambiguous or empty.

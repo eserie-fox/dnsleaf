@@ -1,63 +1,99 @@
-"""Thin orchestration from inventory to discovery, selection, planning, and apply."""
+"""Thin orchestration from workspace entries to discovery, planning, and apply."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
-from typing import cast
 
-from arbor_ddns.config import AliDNSProviderConfig, AppConfig, CloudflareProviderConfig
+from pydantic import BaseModel, ConfigDict, Field
+
+from arbor_ddns.config import AppConfig
 from arbor_ddns.discovery.base import DiscoveryBackend
 from arbor_ddns.discovery.models import DiscoveryResult, SelectionResult
 from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
 from arbor_ddns.discovery.pve_qga import PVEQGADiscoveryBackend
 from arbor_ddns.discovery.selectors import select_address
-from arbor_ddns.dns.alidns import AliDNSProvider
 from arbor_ddns.dns.base import DNSProvider
-from arbor_ddns.dns.cloudflare import CloudflareProvider
-from arbor_ddns.dns.models import DesiredRecord, SyncPlan
+from arbor_ddns.dns.cloudflare import CloudflareDNSProvider
+from arbor_ddns.dns.models import DesiredRecord, DNSRecord, SyncPlan
 from arbor_ddns.dns.planner import plan_dns_changes
-from arbor_ddns.models import InventoryEntry, TargetKind, TargetRef
+from arbor_ddns.models import TargetKind, TargetRef
+from arbor_ddns.workspace.models import ManagedRecordFile, ManagedRecordSnapshot, WorkspaceEntry
+from arbor_ddns.workspace.state import stale_records_for_desired
+from arbor_ddns.workspace.storage import LoadedWorkspace
 
 
-@dataclass(slots=True)
-class EntrySyncOutcome:
-    """Outcome for one inventory entry or ad hoc discovery target."""
+class EntrySyncOutcome(BaseModel):
+    """Outcome for one managed workspace entry."""
 
-    entry: InventoryEntry | None
+    model_config = ConfigDict(extra="forbid")
+
+    entry_name: str
+    source_kind: TargetKind
+    source_id: int
+    fqdn: str
+    record_type: str
     discovery: DiscoveryResult
     selection: SelectionResult
-    plan: SyncPlan | None
+    selection_status: str
+    selection_reason: str
+    selected_value: str | None = None
+    desired_record: DesiredRecord | None = None
+    current_records: list[DNSRecord] = Field(default_factory=list)
+    plan: SyncPlan | None = None
     status: str
     message: str
     applied: bool = False
+    final_record: DNSRecord | None = None
 
 
-@dataclass(slots=True)
-class RunReport:
-    """Collection of per-entry outcomes."""
+class PruneOutcome(BaseModel):
+    """Outcome for one managed-record prune candidate."""
 
-    outcomes: list[EntrySyncOutcome]
+    model_config = ConfigDict(extra="forbid")
+
+    entry_name: str
+    fqdn: str
+    record_type: str
+    record_id: str | None = None
+    value: str
+    status: str
+    message: str
+    plan: SyncPlan | None = None
+    applied: bool = False
+
+
+class WorkspaceRunReport(BaseModel):
+    """Collection of per-entry and prune outcomes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_name: str
     dry_run: bool
+    entry_outcomes: list[EntrySyncOutcome] = Field(default_factory=list)
+    prune_outcomes: list[PruneOutcome] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
     def has_errors(self) -> bool:
-        return any(outcome.status == "error" for outcome in self.outcomes)
+        """Return whether any entry or prune outcome failed."""
+
+        return any(outcome.status == "error" for outcome in self.entry_outcomes) or any(
+            outcome.status == "error" for outcome in self.prune_outcomes
+        )
 
 
 class SyncRunner:
-    """Serial orchestration for discovery and DNS planning."""
+    """Serial orchestration for discovery, DNS planning, and apply."""
 
     def __init__(
         self,
         *,
-        config: AppConfig,
+        app_config: AppConfig,
         discovery_backends: dict[str, DiscoveryBackend],
-        provider_factory: Callable[[str], DNSProvider],
+        provider_factory: Callable[[LoadedWorkspace], DNSProvider],
     ) -> None:
-        self._config = config
+        self._app_config = app_config
         self._discovery_backends = discovery_backends
         self._provider_factory = provider_factory
-        self._provider_cache: dict[str, DNSProvider] = {}
 
     def discover_target(
         self,
@@ -83,87 +119,248 @@ class SyncRunner:
             return discovery, selection
         return discovery, select_address(discovery, policy=policy)
 
-    def plan_inventory(self) -> RunReport:
-        """Plan DNS synchronization for all enabled inventory entries."""
+    def run(
+        self,
+        loaded: LoadedWorkspace,
+        *,
+        managed_state: ManagedRecordFile,
+        apply: bool,
+        prune_managed: bool,
+    ) -> WorkspaceRunReport:
+        """Plan and optionally apply one workspace run."""
 
-        outcomes = [self.plan_entry(entry) for entry in self._config.inventory.enabled_entries()]
-        return RunReport(outcomes=outcomes, dry_run=True)
+        provider = self._provider_factory(loaded)
+        entry_outcomes = [
+            self._plan_entry(provider, loaded, entry)
+            for entry in loaded.entries_file.enabled_entries()
+        ]
 
-    def plan_entry(self, entry: InventoryEntry) -> EntrySyncOutcome:
-        """Plan DNS synchronization for a single entry."""
+        prune_outcomes: list[PruneOutcome] = []
+        if prune_managed:
+            enabled_descriptors = {
+                entry.descriptor for entry in loaded.entries_file.enabled_entries()
+            }
+            for record in stale_records_for_desired(
+                managed_state,
+                enabled_descriptors=enabled_descriptors,
+            ):
+                prune_outcomes.append(self._plan_prune(provider, record))
 
+        if apply:
+            entry_outcomes = [
+                self._apply_entry_outcome(provider, outcome) for outcome in entry_outcomes
+            ]
+            prune_outcomes = [
+                self._apply_prune_outcome(provider, outcome) for outcome in prune_outcomes
+            ]
+
+        return WorkspaceRunReport(
+            workspace_name=loaded.resolved_workspace.workspace_name,
+            dry_run=not apply,
+            entry_outcomes=entry_outcomes,
+            prune_outcomes=prune_outcomes,
+        )
+
+    def _plan_entry(
+        self,
+        provider: DNSProvider,
+        loaded: LoadedWorkspace,
+        entry: WorkspaceEntry,
+    ) -> EntrySyncOutcome:
         discovery, selection = self.discover_target(
             entry.to_target_ref(),
             policy=entry.selection_policy,
         )
         if discovery.error is not None:
             return EntrySyncOutcome(
-                entry=entry,
+                entry_name=entry.name,
+                source_kind=entry.source_kind,
+                source_id=entry.source_id,
+                fqdn=entry.fqdn,
+                record_type=entry.record_type,
                 discovery=discovery,
                 selection=selection,
-                plan=None,
+                selection_status=selection.status,
+                selection_reason=selection.reason,
                 status="error",
                 message=discovery.error,
             )
 
         if selection.selected is None:
             return EntrySyncOutcome(
-                entry=entry,
+                entry_name=entry.name,
+                source_kind=entry.source_kind,
+                source_id=entry.source_id,
+                fqdn=entry.fqdn,
+                record_type=entry.record_type,
                 discovery=discovery,
                 selection=selection,
-                plan=None,
+                selection_status=selection.status,
+                selection_reason=selection.reason,
                 status="skipped",
                 message=selection.reason,
             )
 
         desired = DesiredRecord(
-            provider=entry.provider,
+            provider=loaded.resolved_workspace.provider,
             fqdn=entry.fqdn,
-            record_type="AAAA",
+            record_type=entry.record_type,
             value=selection.selected.address,
-            ttl=self._config.dns.default_ttl,
+            ttl=entry.effective_ttl(loaded.resolved_workspace.default_ttl),
+            proxied=entry.effective_proxied(loaded.resolved_workspace.default_proxied),
         )
 
         try:
-            provider = self._provider_for_name(entry.provider)
-            current_records = provider.list_records(entry.fqdn, "AAAA")
-        except NotImplementedError as exc:
+            current_records = provider.list_records(entry.fqdn, entry.record_type)
+        except Exception as exc:
             return EntrySyncOutcome(
-                entry=entry,
+                entry_name=entry.name,
+                source_kind=entry.source_kind,
+                source_id=entry.source_id,
+                fqdn=entry.fqdn,
+                record_type=entry.record_type,
                 discovery=discovery,
                 selection=selection,
-                plan=None,
-                status="skipped",
+                selection_status=selection.status,
+                selection_reason=selection.reason,
+                selected_value=selection.selected.address,
+                desired_record=desired,
+                status="error",
                 message=str(exc),
             )
 
         plan = plan_dns_changes(current_records=current_records, desired_record=desired)
-        message = "changes planned" if plan.has_changes() else "already in sync"
+        final_record = None
+        if len(plan.changes) == 1 and plan.changes[0].action == "noop" and current_records:
+            final_record = current_records[0]
+
         return EntrySyncOutcome(
-            entry=entry,
+            entry_name=entry.name,
+            source_kind=entry.source_kind,
+            source_id=entry.source_id,
+            fqdn=entry.fqdn,
+            record_type=entry.record_type,
             discovery=discovery,
             selection=selection,
+            selection_status=selection.status,
+            selection_reason=selection.reason,
+            selected_value=selection.selected.address,
+            desired_record=desired,
+            current_records=current_records,
             plan=plan,
             status="planned",
-            message=message,
+            message="changes planned" if plan.has_changes() else "already in sync",
+            final_record=final_record,
         )
 
-    def sync_once(self, *, apply: bool = False) -> RunReport:
-        """Plan and optionally apply all enabled inventory entries."""
+    def _plan_prune(self, provider: DNSProvider, record: ManagedRecordSnapshot) -> PruneOutcome:
+        if record.record_id is None:
+            return PruneOutcome(
+                entry_name=record.entry_name,
+                fqdn=record.fqdn,
+                record_type=record.record_type,
+                record_id=None,
+                value=record.value,
+                status="skipped",
+                message="managed record has no record_id; prune is skipped safely",
+            )
 
-        report = self.plan_inventory()
-        if not apply:
-            return report
+        try:
+            current_records = provider.list_records(record.fqdn, record.record_type)
+        except Exception as exc:
+            return PruneOutcome(
+                entry_name=record.entry_name,
+                fqdn=record.fqdn,
+                record_type=record.record_type,
+                record_id=record.record_id,
+                value=record.value,
+                status="error",
+                message=str(exc),
+            )
 
-        applied_outcomes: list[EntrySyncOutcome] = []
-        for outcome in report.outcomes:
-            if outcome.entry is None or outcome.plan is None or not outcome.plan.has_changes():
-                applied_outcomes.append(outcome)
-                continue
-            provider = self._provider_for_name(outcome.entry.provider)
-            provider.apply_plan(outcome.plan)
-            applied_outcomes.append(replace(outcome, applied=True, message="applied"))
-        return RunReport(outcomes=applied_outcomes, dry_run=False)
+        current_record = next(
+            (item for item in current_records if item.record_id == record.record_id),
+            None,
+        )
+        if current_record is None:
+            return PruneOutcome(
+                entry_name=record.entry_name,
+                fqdn=record.fqdn,
+                record_type=record.record_type,
+                record_id=record.record_id,
+                value=record.value,
+                status="confirmed_absent",
+                message="managed record is already absent from the provider",
+            )
+
+        plan = plan_dns_changes(current_records=[current_record], desired_record=None)
+        return PruneOutcome(
+            entry_name=record.entry_name,
+            fqdn=record.fqdn,
+            record_type=record.record_type,
+            record_id=record.record_id,
+            value=record.value,
+            plan=plan,
+            status="planned",
+            message="managed record should be pruned",
+        )
+
+    def _apply_entry_outcome(
+        self,
+        provider: DNSProvider,
+        outcome: EntrySyncOutcome,
+    ) -> EntrySyncOutcome:
+        if outcome.plan is None or outcome.status != "planned":
+            return outcome
+        if not outcome.plan.has_changes():
+            return outcome.model_copy(
+                update={
+                    "applied": False,
+                    "final_record": outcome.final_record,
+                    "message": "already in sync",
+                }
+            )
+
+        final_record = outcome.final_record
+        try:
+            for change in outcome.plan.changes:
+                if change.action == "noop":
+                    if change.current is not None:
+                        final_record = change.current
+                    continue
+                result = provider.apply_change(change)
+                if result is not None:
+                    final_record = result
+        except Exception as exc:
+            return outcome.model_copy(update={"status": "error", "message": str(exc)})
+
+        return outcome.model_copy(
+            update={
+                "applied": True,
+                "final_record": final_record,
+                "message": "applied",
+            }
+        )
+
+    def _apply_prune_outcome(
+        self,
+        provider: DNSProvider,
+        outcome: PruneOutcome,
+    ) -> PruneOutcome:
+        if outcome.status == "confirmed_absent":
+            return outcome
+        if outcome.plan is None or outcome.status != "planned":
+            return outcome
+        try:
+            for change in outcome.plan.changes:
+                if change.action == "noop":
+                    continue
+                provider.apply_change(change)
+        except Exception as exc:
+            return outcome.model_copy(update={"status": "error", "message": str(exc)})
+        return outcome.model_copy(
+            update={"status": "applied", "applied": True, "message": "pruned"}
+        )
 
     def _backend_for_kind(self, kind: TargetKind) -> DiscoveryBackend:
         try:
@@ -171,35 +368,27 @@ class SyncRunner:
         except KeyError as exc:
             raise KeyError(f"no discovery backend registered for kind {kind.value}") from exc
 
-    def _provider_for_name(self, provider_name: str) -> DNSProvider:
-        if provider_name not in self._provider_cache:
-            self._provider_cache[provider_name] = self._provider_factory(provider_name)
-        return self._provider_cache[provider_name]
 
-
-def build_runner(config: AppConfig) -> SyncRunner:
-    """Build the default serial runner from raw app config."""
+def build_runner(app_config: AppConfig) -> SyncRunner:
+    """Build the default workspace runner."""
 
     discovery_backends: dict[str, DiscoveryBackend] = {
         TargetKind.LXC.value: PVELXCDiscoveryBackend(
-            pct_bin=config.discovery.pct_bin,
-            shell_bin=config.discovery.shell_bin,
+            pct_bin=app_config.discovery.pct_bin,
+            shell_bin=app_config.discovery.shell_bin,
         ),
         TargetKind.VM.value: PVEQGADiscoveryBackend(
-            qm_bin=config.discovery.qm_bin,
+            qm_bin=app_config.discovery.qm_bin,
         ),
     }
     return SyncRunner(
-        config=config,
+        app_config=app_config,
         discovery_backends=discovery_backends,
-        provider_factory=lambda provider_name: _build_provider(config, provider_name),
+        provider_factory=lambda loaded: _build_provider(loaded),
     )
 
 
-def _build_provider(config: AppConfig, provider_name: str) -> DNSProvider:
-    provider_config = config.provider_config(provider_name)
-    if provider_name == "alidns":
-        return AliDNSProvider(cast(AliDNSProviderConfig, provider_config))
-    if provider_name == "cloudflare":
-        return CloudflareProvider(cast(CloudflareProviderConfig, provider_config))
-    raise KeyError(f"unknown provider: {provider_name}")
+def _build_provider(loaded: LoadedWorkspace) -> DNSProvider:
+    if loaded.resolved_workspace.provider != "cloudflare":
+        raise KeyError(f"unsupported DNS provider: {loaded.resolved_workspace.provider}")
+    return CloudflareDNSProvider(loaded.resolved_workspace.cloudflare_provider_config())

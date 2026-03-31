@@ -1,51 +1,69 @@
 # DNS Sync
 
-## Provider Abstraction
+The current DNS provider scope is Cloudflare only.
 
-`dns/base.py` 定义统一 provider 接口：
+## Provider responsibilities
 
-- `list_records(fqdn, record_type)`
-- `apply_change(change)`
-- `apply_plan(plan)`
+The Cloudflare provider is responsible for:
 
-当前 phase 1 已创建：
+- verifying token and zone access
+- resolving `zone_id` from `zone_name` when needed
+- listing current DNS records
+- creating records
+- updating records
+- deleting records
+- mapping Cloudflare API responses into project models
 
-- `dns/alidns.py`
-- `dns/cloudflare.py`
+The provider does not choose guest IP addresses.
 
-两者目前是结构完整的 stub，接口签名已定，但真实网络调用尚未实现。
+## Planner responsibilities
 
-## Planner
+The planner compares:
 
-`dns/planner.py` 接收：
+- current provider state
+- desired single-record state
 
-- 当前记录集合 `current_records`
-- 期望记录 `desired_record`
-
-输出 `SyncPlan`，其中包含一组 `PlannedChange`：
+It returns deterministic changes:
 
 - `create`
 - `update`
 - `delete`
 - `noop`
 
-planner 只处理 DNS 状态差异，不负责猜测哪个 IPv6 更适合写入。
+## Verify flow
 
-## Dry Run / Apply
+`arbor-ddns provider verify --workspace <dir>` checks:
 
-- `plan` 命令：只规划，不执行
-- `sync-once --dry-run`：规划并打印
-- `sync-once --apply`：调用 provider 执行计划
+1. token file exists and is readable
+2. token is non-empty
+3. Cloudflare authentication works
+4. the zone can be resolved
+5. DNS record listing succeeds
 
-当前 provider stub 未实现时，runner 会返回 `skipped`，避免做不透明的假同步。
+## Zone behavior
 
-## Extension Points
+- if `zone_id` is configured, it is used directly
+- if `zone_id` is empty and `zone_name` is set, the provider resolves the zone id through the Cloudflare API
+- resolved zone ids are cached in memory for the current process
 
-后续扩展 provider 时，建议只在 `dns/` 域内新增：
+## Token handling
 
-- provider config 字段
-- provider HTTP 实现
-- record 查询与变更映射
+The token is never embedded directly in workspace source config.
 
-不要将 provider 细节泄漏到 discovery 或 selector。
+The workspace stores only `api_token_file`, and the provider reads and strips the file contents at runtime.
 
+## CNAME conflict handling
+
+If the target name already has a `CNAME`, the provider raises a clear error instead of silently attempting an invalid `A` or `AAAA` mutation.
+
+## Prune behavior
+
+Prune is disabled by default.
+
+When enabled, prune only targets records that:
+
+- were previously tracked in `state/managed-records.json`
+- are no longer part of the current desired workspace state
+- still have a usable `record_id`
+
+Untracked zone records are never deleted by prune.

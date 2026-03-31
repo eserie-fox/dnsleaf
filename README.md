@@ -1,36 +1,98 @@
 # arbor-ddns
 
-`arbor-ddns` 是一个轻量、独立、可测试的 Python 工具，用于在 PVE 宿主上发现
-指定 LXC / Linux VM 的 IPv6 候选地址，按明确策略选出一个适合 AAAA 记录的目标地址，
-然后规划并执行 DNS 同步。
+`arbor-ddns` is a lightweight, workspace-driven DDNS tool for PVE guests.
+It discovers guest IPv6 addresses from the PVE host, selects one stable AAAA target, plans the required Cloudflare DNS changes, and can install a systemd timer for periodic sync.
 
-项目当前第一阶段已实现：
+The current scope is intentionally narrow:
 
-- PVE LXC discovery backend
-- PVE QGA discovery backend
-- 可独立测试的 IPv6 selector
-- DNS planner 与 provider 抽象
-- 串行 sync runner
-- Typer CLI
-- 配置、文档与测试骨架
+- discovery backends: `pct exec` for LXC, `qm agent network-get-interfaces` for VMs
+- address selection: IPv6-only, tuned for DNS AAAA
+- DNS provider: Cloudflare only
+- operations model: workspace source files + rendered artifacts + state
 
-## 安装
+## Install
 
 ```bash
-uv sync --extra dev
+uv sync --python 3.11
 ```
 
-## 运行
+## Quick start
+
+1. Initialize a workspace.
 
 ```bash
-uv run arbor-ddns --help
-uv run arbor-ddns discover lxc 101
-uv run arbor-ddns discover vm 201
-uv run arbor-ddns plan
-uv run arbor-ddns sync-once --dry-run
+uv run arbor-ddns init ./workspaces/example-zone
 ```
 
-## 测试
+2. Put a Cloudflare API token into the workspace.
+
+```bash
+printf '%s\n' 'YOUR_TOKEN' > ./workspaces/example-zone/secrets/cloudflare_api_token.txt
+```
+
+3. Edit `workspace.yaml` and set at least:
+
+- `zone_name`
+- optional `zone_id`
+- `api_token_file` if you want a different token path
+
+4. Add entries.
+
+```bash
+uv run arbor-ddns entry add lxc \
+  --workspace ./workspaces/example-zone \
+  --id 101 \
+  --fqdn host.example.com \
+  --name web
+
+uv run arbor-ddns entry add vm \
+  --workspace ./workspaces/example-zone \
+  --id 201 \
+  --fqdn vm.example.com \
+  --name guest
+```
+
+5. Validate and verify provider access.
+
+```bash
+uv run arbor-ddns validate --workspace ./workspaces/example-zone
+uv run arbor-ddns provider verify --workspace ./workspaces/example-zone
+```
+
+6. Inspect the live DNS plan, then sync once.
+
+```bash
+uv run arbor-ddns plan --workspace ./workspaces/example-zone
+uv run arbor-ddns sync-once --workspace ./workspaces/example-zone
+uv run arbor-ddns sync-once --workspace ./workspaces/example-zone --apply
+```
+
+7. Render artifacts or install systemd units.
+
+```bash
+uv run arbor-ddns render --workspace ./workspaces/example-zone
+uv run arbor-ddns apply --workspace ./workspaces/example-zone
+uv run arbor-ddns apply --workspace ./workspaces/example-zone --run-sync
+```
+
+`apply` writes or updates systemd units under `/etc/systemd/system` by default, so it typically needs root privileges.
+
+## Workspace commands
+
+- `arbor-ddns init <dir>`
+- `arbor-ddns validate --workspace <dir>`
+- `arbor-ddns render --workspace <dir>`
+- `arbor-ddns apply --workspace <dir>`
+- `arbor-ddns status --workspace <dir>`
+- `arbor-ddns doctor --workspace <dir>`
+- `arbor-ddns entry list|add|update|remove|enable|disable --workspace <dir>`
+- `arbor-ddns provider verify --workspace <dir>`
+- `arbor-ddns plan --workspace <dir>`
+- `arbor-ddns sync-once --workspace <dir> [--apply]`
+- `arbor-ddns discover lxc <id>`
+- `arbor-ddns discover vm <id>`
+
+## Testing
 
 ```bash
 uv run pytest
@@ -38,4 +100,14 @@ uv run ruff check .
 uv run mypy src
 ```
 
-更多说明见 [docs/index.md](docs/index.md)。
+## Documentation
+
+- [Docs Index](docs/index.md)
+- [Architecture Overview](docs/architecture_overview.md)
+- [Runtime Config](docs/runtime_config.md)
+- [Workspace](docs/workspace.md)
+- [Entry Management](docs/entry_management.md)
+- [Discovery](docs/discovery.md)
+- [DNS Sync](docs/dns_sync.md)
+- [systemd Integration](docs/systemd_integration.md)
+- [Development Constraints](docs/development_constraints.md)
