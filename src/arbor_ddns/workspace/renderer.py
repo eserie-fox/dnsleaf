@@ -17,8 +17,12 @@ class WorkspaceRenderer:
         """Render effective config, desired-record specs, and systemd units."""
 
         desired_records = [
-            DesiredRecordSpec.from_entry(workspace=loaded.resolved_workspace, entry=entry)
+            spec
             for entry in loaded.entries_file.entries
+            for spec in DesiredRecordSpec.from_entry(
+                workspace=loaded.resolved_workspace,
+                entry=entry,
+            )
         ]
         dump_json_data(
             loaded.paths.effective_workspace_file,

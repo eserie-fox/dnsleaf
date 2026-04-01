@@ -9,11 +9,10 @@ from arbor_ddns.models import TargetRef
 
 
 class DiscoveryBackend(ABC):
-    """Abstract IPv6 discovery backend."""
+    """Abstract IP discovery backend."""
 
     name: str
 
     @abstractmethod
     def discover(self, target: TargetRef) -> DiscoveryResult:
         """Discover address candidates for a target."""
-

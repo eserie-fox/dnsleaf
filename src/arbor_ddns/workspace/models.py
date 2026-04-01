@@ -8,8 +8,16 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from arbor_ddns.config.merge import deep_merge
+from arbor_ddns.config.scaffold import (
+    load_entries_scaffold_defaults,
+    load_workspace_scaffold_defaults,
+)
+from arbor_ddns.config.shared import DiscoveryCommandPaths
 from arbor_ddns.dns.cloudflare import CloudflareProviderConfig
-from arbor_ddns.models import TargetKind, TargetRef
+from arbor_ddns.logging.config import ArborDDNSLoggingConfig, ResolvedArborDDNSLoggingConfig
+from arbor_ddns.models import EntryAddressFamily, EntrySourceKind, IPAddressFamily, TargetRef
+from arbor_ddns.util.ip import normalize_ip
 
 WORKSPACE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 ENTRY_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -72,6 +80,40 @@ class WorkspaceApplyConfig(BaseModel):
     prune_managed_records: bool
 
 
+class WorkspaceRuntimePaths(DiscoveryCommandPaths):
+    """Workspace-scoped execution paths and command locations."""
+
+    systemctl_bin: str
+    systemd_unit_dir: str
+
+    @field_validator("systemctl_bin", "systemd_unit_dir")
+    @classmethod
+    def _validate_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("workspace paths values must not be blank")
+        return stripped
+
+    def resolved_systemd_unit_dir(self, workspace_root: Path) -> Path:
+        """Resolve the configured systemd unit directory against the workspace root."""
+
+        raw_path = Path(self.systemd_unit_dir).expanduser()
+        if raw_path.is_absolute():
+            return raw_path.resolve()
+        return (workspace_root / raw_path).resolve()
+
+    def resolve(self, workspace_root: Path) -> ResolvedWorkspaceRuntimePaths:
+        """Resolve runtime-only path values."""
+
+        return ResolvedWorkspaceRuntimePaths(
+            pct_bin=self.pct_bin,
+            qm_bin=self.qm_bin,
+            shell_bin=self.shell_bin,
+            systemctl_bin=self.systemctl_bin,
+            systemd_unit_dir=str(self.resolved_systemd_unit_dir(workspace_root)),
+        )
+
+
 class WorkspaceConfig(BaseModel):
     """User-maintained workspace source config."""
 
@@ -85,14 +127,16 @@ class WorkspaceConfig(BaseModel):
     api_token_file: str
     default_ttl: int = Field(ge=1)
     default_proxied: bool
+    paths: WorkspaceRuntimePaths
     systemd: WorkspaceSystemdConfig
     apply: WorkspaceApplyConfig
+    arbor_ddns_logging: ArborDDNSLoggingConfig
 
     @field_validator("config_version")
     @classmethod
     def _validate_config_version(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("config_version must be >= 1")
+        if value != 3:
+            raise ValueError("workspace config_version must be exactly 3")
         return value
 
     @field_validator("workspace_name")
@@ -142,6 +186,16 @@ class WorkspaceConfig(BaseModel):
 
         return self.systemd.resolved_timer_name(self.workspace_name)
 
+    @classmethod
+    def scaffold_defaults(cls, workspace_name: str) -> WorkspaceConfig:
+        """Build the typed default `workspace.yaml` model for one workspace name."""
+
+        workspace_mapping = deep_merge(
+            load_workspace_scaffold_defaults(),
+            {"workspace_name": workspace_name},
+        )
+        return cls.model_validate(workspace_mapping)
+
     def resolve(self, workspace_root: Path) -> ResolvedWorkspace:
         """Resolve runtime-only workspace values."""
 
@@ -154,6 +208,7 @@ class WorkspaceConfig(BaseModel):
             api_token_file=str(self.resolved_api_token_file(workspace_root)),
             default_ttl=self.default_ttl,
             default_proxied=self.default_proxied,
+            paths=self.paths.resolve(workspace_root),
             systemd=ResolvedWorkspaceSystemdConfig(
                 service_name=self.resolved_service_name(),
                 timer_name=self.resolved_timer_name(),
@@ -162,6 +217,7 @@ class WorkspaceConfig(BaseModel):
                 run_sync_after_apply=self.systemd.run_sync_after_apply,
             ),
             apply=self.apply,
+            arbor_ddns_logging=self.arbor_ddns_logging.resolve(workspace_root),
         )
 
 
@@ -171,45 +227,38 @@ class WorkspaceEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    source_kind: TargetKind
-    source_id: int = Field(ge=1)
+    source_kind: EntrySourceKind
+    family: EntryAddressFamily
     fqdn: str
-    record_type: str
-    selection_policy: str
     enabled: bool
+    source_id: int | None = Field(default=None, ge=1)
+    selection_policy: str | None = None
     ttl: int | None = Field(default=None, ge=1)
     proxied: bool | None = None
     description: str | None = None
+    static_ipv4: str | None = None
+    static_ipv6: str | None = None
 
     @field_validator("name")
     @classmethod
     def _validate_entry_name(cls, value: str) -> str:
         return _validate_name(value, pattern=ENTRY_NAME_RE, field_name="entry name")
 
-    @field_validator("fqdn", "selection_policy")
+    @field_validator("fqdn")
     @classmethod
-    def _validate_non_empty(cls, value: str) -> str:
+    def _validate_fqdn(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError("value must not be blank")
+            raise ValueError("fqdn must not be blank")
         return stripped
 
-    @field_validator("record_type")
+    @field_validator("selection_policy")
     @classmethod
-    def _normalize_record_type(cls, value: str) -> str:
-        normalized = value.strip().upper()
-        if normalized not in {"A", "AAAA"}:
-            raise ValueError("record_type must be A or AAAA")
-        return normalized
-
-    @model_validator(mode="after")
-    def _validate_supported_record_type(self) -> Self:
-        if self.record_type == "A":
-            raise ValueError(
-                "record_type A is reserved for future expansion and is not supported in "
-                "workspace-managed discovery yet"
-            )
-        return self
+    def _normalize_selection_policy(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
     @field_validator("description")
     @classmethod
@@ -219,10 +268,48 @@ class WorkspaceEntry(BaseModel):
         stripped = value.strip()
         return stripped or None
 
+    @field_validator("static_ipv4", "static_ipv6")
+    @classmethod
+    def _normalize_static_ip(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return normalize_ip(stripped)
+
+    @model_validator(mode="after")
+    def _validate_source_shape(self) -> Self:
+        if self.source_kind is EntrySourceKind.STATIC:
+            if self.source_id is not None:
+                raise ValueError("static entries must not define source_id")
+            if self.selection_policy is not None:
+                raise ValueError("static entries must not define selection_policy")
+            if (
+                self.family in {EntryAddressFamily.IPV4, EntryAddressFamily.BOTH}
+                and self.static_ipv4 is None
+            ):
+                raise ValueError("static_ipv4 is required for static ipv4/both entries")
+            if (
+                self.family in {EntryAddressFamily.IPV6, EntryAddressFamily.BOTH}
+                and self.static_ipv6 is None
+            ):
+                raise ValueError("static_ipv6 is required for static ipv6/both entries")
+        else:
+            if self.source_id is None:
+                raise ValueError("dynamic lxc/vm entries require source_id")
+            if self.selection_policy is None:
+                raise ValueError("dynamic lxc/vm entries require selection_policy")
+            if self.static_ipv4 is not None or self.static_ipv6 is not None:
+                raise ValueError("dynamic lxc/vm entries must not define static IP values")
+        return self
+
     def to_target_ref(self) -> TargetRef:
         """Return the discovery target for this entry."""
 
-        return TargetRef(kind=self.source_kind, id=self.source_id)
+        if self.source_id is None:
+            raise ValueError("static entries do not have a discovery target")
+        return TargetRef(kind=self.source_kind.to_target_kind(), id=self.source_id)
 
     def effective_ttl(self, default_ttl: int) -> int:
         """Return the entry-specific TTL, or the workspace default."""
@@ -234,11 +321,38 @@ class WorkspaceEntry(BaseModel):
 
         return self.proxied if self.proxied is not None else default_proxied
 
-    @property
-    def descriptor(self) -> str:
+    def concrete_families(self) -> tuple[IPAddressFamily, ...]:
+        """Return the concrete record families managed by this entry."""
+
+        return self.family.concrete_families()
+
+    def descriptor_for_record_type(self, record_type: str) -> str:
         """Return the stable descriptor used in managed-record state."""
 
-        return f"{self.name}|{self.fqdn}|{self.record_type}"
+        return f"{self.name}|{self.fqdn}|{record_type}"
+
+    def descriptors(self) -> set[str]:
+        """Return all managed-record descriptors for this entry."""
+
+        return {
+            self.descriptor_for_record_type(family.record_type)
+            for family in self.concrete_families()
+        }
+
+    def static_value_for_family(self, family: IPAddressFamily) -> str | None:
+        """Return the static value configured for one family."""
+
+        if family is IPAddressFamily.IPV4:
+            return self.static_ipv4
+        return self.static_ipv6
+
+    @property
+    def source_descriptor(self) -> str:
+        """Return a compact source descriptor for logs and CLI output."""
+
+        if self.source_kind is EntrySourceKind.STATIC:
+            return "static"
+        return f"{self.source_kind.value}/{self.source_id}"
 
 
 class EntriesFile(BaseModel):
@@ -252,8 +366,8 @@ class EntriesFile(BaseModel):
     @field_validator("config_version")
     @classmethod
     def _validate_config_version(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("config_version must be >= 1")
+        if value != 2:
+            raise ValueError("entries config_version must be exactly 2")
         return value
 
     @model_validator(mode="after")
@@ -282,6 +396,12 @@ class EntriesFile(BaseModel):
                 return entry
         return None
 
+    @classmethod
+    def scaffold_defaults(cls) -> EntriesFile:
+        """Build the typed default `entries.yaml` model."""
+
+        return cls.model_validate(load_entries_scaffold_defaults())
+
 
 class ResolvedWorkspaceSystemdConfig(BaseModel):
     """Runtime-resolved systemd config."""
@@ -294,6 +414,22 @@ class ResolvedWorkspaceSystemdConfig(BaseModel):
     on_unit_active_sec: str
     run_sync_after_apply: bool
 
+
+class ResolvedWorkspaceRuntimePaths(BaseModel):
+    """Runtime-resolved workspace execution paths."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pct_bin: str
+    qm_bin: str
+    shell_bin: str
+    systemctl_bin: str
+    systemd_unit_dir: str
+
+    def resolved_systemd_unit_dir(self) -> Path:
+        """Return the absolute systemd unit directory."""
+
+        return Path(self.systemd_unit_dir)
 
 class ResolvedWorkspace(BaseModel):
     """Runtime-resolved workspace config."""
@@ -308,8 +444,10 @@ class ResolvedWorkspace(BaseModel):
     api_token_file: str
     default_ttl: int
     default_proxied: bool
+    paths: ResolvedWorkspaceRuntimePaths
     systemd: ResolvedWorkspaceSystemdConfig
     apply: WorkspaceApplyConfig
+    arbor_ddns_logging: ResolvedArborDDNSLoggingConfig
 
     def cloudflare_provider_config(self) -> CloudflareProviderConfig:
         """Build a Cloudflare provider config from the resolved workspace."""
@@ -333,13 +471,16 @@ class DesiredRecordSpec(BaseModel):
     entry_name: str
     provider: str
     fqdn: str
+    family: IPAddressFamily
     record_type: str
     ttl: int
     proxied: bool
-    source_kind: TargetKind
-    source_id: int
-    selection_policy: str
+    source_kind: EntrySourceKind
+    source_id: int | None
+    selection_policy: str | None
     enabled: bool
+    value_source: Literal["dynamic", "static"]
+    static_value: str | None = None
     description: str | None = None
 
     @classmethod
@@ -348,22 +489,28 @@ class DesiredRecordSpec(BaseModel):
         *,
         workspace: ResolvedWorkspace,
         entry: WorkspaceEntry,
-    ) -> DesiredRecordSpec:
-        """Build a renderable desired-record spec for one entry."""
+    ) -> list[DesiredRecordSpec]:
+        """Build renderable desired-record specs for one entry."""
 
-        return cls(
-            entry_name=entry.name,
-            provider=workspace.provider,
-            fqdn=entry.fqdn,
-            record_type=entry.record_type,
-            ttl=entry.effective_ttl(workspace.default_ttl),
-            proxied=entry.effective_proxied(workspace.default_proxied),
-            source_kind=entry.source_kind,
-            source_id=entry.source_id,
-            selection_policy=entry.selection_policy,
-            enabled=entry.enabled,
-            description=entry.description,
-        )
+        return [
+            cls(
+                entry_name=entry.name,
+                provider=workspace.provider,
+                fqdn=entry.fqdn,
+                family=family,
+                record_type=family.record_type,
+                ttl=entry.effective_ttl(workspace.default_ttl),
+                proxied=entry.effective_proxied(workspace.default_proxied),
+                source_kind=entry.source_kind,
+                source_id=entry.source_id,
+                selection_policy=entry.selection_policy,
+                enabled=entry.enabled,
+                value_source="static" if entry.source_kind is EntrySourceKind.STATIC else "dynamic",
+                static_value=entry.static_value_for_family(family),
+                description=entry.description,
+            )
+            for family in entry.concrete_families()
+        ]
 
 
 class ValidationReport(BaseModel):
@@ -481,9 +628,14 @@ class WorkspaceStatus(BaseModel):
     zone_name: str | None
     zone_id: str | None
     token_file: str | None
+    systemd_unit_dir: str | None = None
     entry_count: int
     enabled_entry_count: int
     rendered_artifacts: dict[str, bool]
+    runtime_dir_exists: bool
+    runtime_log_file: str
+    runtime_log_file_exists: bool
+    runtime_log_symlink_target: str | None = None
     managed_active_count: int
     managed_stale_count: int
     last_apply: LastApplyState | None = None
@@ -516,3 +668,28 @@ class DoctorReport(BaseModel):
         """Return whether the report contains no error-level checks."""
 
         return all(check.status != "error" for check in self.checks)
+
+
+class UninstallReport(BaseModel):
+    """Workspace uninstall summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_root: str
+    workspace_name: str | None
+    service_name: str
+    timer_name: str
+    systemctl_available: bool
+    service_stopped: bool = False
+    timer_stopped: bool = False
+    timer_disabled: bool = False
+    service_unit_removed: bool = False
+    timer_unit_removed: bool = False
+    daemon_reloaded: bool = False
+    service_reset_failed: bool = False
+    timer_reset_failed: bool = False
+    removed_paths: list[str] = Field(default_factory=list)
+    kept_paths: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    purged: bool = False
+    manual_cleanup_hint: str | None = None

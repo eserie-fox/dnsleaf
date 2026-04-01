@@ -8,8 +8,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from arbor_ddns.config import AppConfig
-from arbor_ddns.util.process import CommandNotFoundError, command_available, run_command
+from arbor_ddns.util.process import (
+    CommandNotFoundError,
+    CommandResult,
+    command_available,
+    run_command,
+)
 from arbor_ddns.workspace.models import ResolvedWorkspace, SystemdUnitStatus
 from arbor_ddns.workspace.storage import WorkspacePaths
 
@@ -20,9 +24,6 @@ class SystemdError(RuntimeError):
 
 class SystemdManager:
     """Render and manage system-level workspace units."""
-
-    def __init__(self, app_config: AppConfig | None = None) -> None:
-        self._app_config = app_config or AppConfig.from_defaults()
 
     def render_service_unit(self, workspace: ResolvedWorkspace) -> str:
         """Render the systemd service unit text."""
@@ -66,7 +67,7 @@ class SystemdManager:
     ) -> tuple[Path, Path]:
         """Install rendered unit files into the configured systemd directory."""
 
-        unit_dir = self._app_config.systemd.resolved_unit_dir()
+        unit_dir = self._unit_dir(workspace)
         unit_dir.mkdir(parents=True, exist_ok=True)
         installed_service = unit_dir / f"{workspace.systemd.service_name}.service"
         installed_timer = unit_dir / f"{workspace.systemd.timer_name}.timer"
@@ -80,27 +81,117 @@ class SystemdManager:
         )
         return installed_service, installed_timer
 
-    def daemon_reload(self) -> None:
+    def daemon_reload(self, workspace: ResolvedWorkspace, *, check: bool = True) -> CommandResult:
         """Run `systemctl daemon-reload`."""
 
-        run_command([self._app_config.systemd.systemctl_bin, "daemon-reload"])
+        return run_command([self._systemctl_bin(workspace), "daemon-reload"], check=check)
 
-    def enable_restart_timer(self, timer_name: str) -> None:
+    def enable_restart_timer(self, workspace: ResolvedWorkspace, timer_name: str) -> None:
         """Enable and restart the timer unit."""
 
-        systemctl = self._app_config.systemd.systemctl_bin
+        systemctl = self._systemctl_bin(workspace)
         run_command([systemctl, "enable", f"{timer_name}.timer"])
         run_command([systemctl, "restart", f"{timer_name}.timer"])
 
-    def start_service(self, service_name: str) -> None:
+    def start_service(self, workspace: ResolvedWorkspace, service_name: str) -> None:
         """Start a oneshot service immediately."""
 
-        run_command([self._app_config.systemd.systemctl_bin, "start", f"{service_name}.service"])
+        run_command([self._systemctl_bin(workspace), "start", f"{service_name}.service"])
 
-    def status(self, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
+    def stop_service(
+        self,
+        workspace: ResolvedWorkspace,
+        service_name: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        """Stop a oneshot service if present."""
+
+        return run_command(
+            [self._systemctl_bin(workspace), "stop", f"{service_name}.service"],
+            check=check,
+        )
+
+    def stop_timer(
+        self,
+        workspace: ResolvedWorkspace,
+        timer_name: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        """Stop a timer if present."""
+
+        return run_command(
+            [self._systemctl_bin(workspace), "stop", f"{timer_name}.timer"],
+            check=check,
+        )
+
+    def disable_timer(
+        self,
+        workspace: ResolvedWorkspace,
+        timer_name: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        """Disable a timer if present."""
+
+        return run_command(
+            [self._systemctl_bin(workspace), "disable", f"{timer_name}.timer"],
+            check=check,
+        )
+
+    def reset_failed(
+        self,
+        workspace: ResolvedWorkspace,
+        unit_name: str,
+        unit_kind: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        """Clear retained failed state for one unit."""
+
+        return run_command(
+            [
+                self._systemctl_bin(workspace),
+                "reset-failed",
+                f"{unit_name}.{unit_kind}",
+            ],
+            check=check,
+        )
+
+    def installed_unit_path(
+        self,
+        workspace: ResolvedWorkspace,
+        unit_name: str,
+        unit_kind: str,
+    ) -> Path:
+        """Return the configured installed unit path for one unit."""
+
+        return self._unit_dir(workspace) / f"{unit_name}.{unit_kind}"
+
+    def remove_installed_unit(
+        self,
+        workspace: ResolvedWorkspace,
+        unit_name: str,
+        unit_kind: str,
+    ) -> Path | None:
+        """Remove one installed unit file if present."""
+
+        path = self.installed_unit_path(workspace, unit_name, unit_kind)
+        if not path.exists():
+            return None
+        path.unlink()
+        return path
+
+    def status(
+        self,
+        workspace: ResolvedWorkspace,
+        unit_name: str,
+        unit_kind: str,
+    ) -> SystemdUnitStatus:
         """Return systemd status for one unit."""
 
-        systemctl = self._app_config.systemd.systemctl_bin
+        systemctl = self._systemctl_bin(workspace)
         try:
             result = run_command(
                 [
@@ -134,17 +225,23 @@ class SystemdManager:
             ),
         )
 
-    def systemctl_available(self) -> bool:
+    def systemctl_available(self, workspace: ResolvedWorkspace) -> bool:
         """Return whether `systemctl` is available."""
 
-        return command_available(self._app_config.systemd.systemctl_bin)
+        return command_available(self._systemctl_bin(workspace))
 
-    def unit_dir_writable(self) -> bool:
+    def unit_dir_writable(self, workspace: ResolvedWorkspace) -> bool:
         """Return whether the configured unit directory is writable."""
 
-        unit_dir = self._app_config.systemd.resolved_unit_dir()
+        unit_dir = self._unit_dir(workspace)
         target = unit_dir if unit_dir.exists() else unit_dir.parent
         return target.exists() and target.is_dir() and os_access_write(target)
+
+    def _systemctl_bin(self, workspace: ResolvedWorkspace) -> str:
+        return workspace.paths.systemctl_bin
+
+    def _unit_dir(self, workspace: ResolvedWorkspace) -> Path:
+        return workspace.paths.resolved_systemd_unit_dir()
 
     def _exec_start_args(self, workspace_root: Path) -> list[str]:
         console_script = shutil.which("arbor-ddns")

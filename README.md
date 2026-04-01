@@ -1,12 +1,13 @@
 # arbor-ddns
 
-`arbor-ddns` is a lightweight, workspace-driven DDNS tool for PVE guests.
-It discovers guest IPv6 addresses from the PVE host, selects one stable AAAA target, plans the required Cloudflare DNS changes, and can install a systemd timer for periodic sync.
+`arbor-ddns` is a lightweight, workspace-driven DDNS tool for PVE guests and static IP targets.
+It discovers guest IPv4 and IPv6 addresses from the PVE host, selects publishable dynamic candidates, syncs `A` and `AAAA` records to Cloudflare, and can install a systemd timer for periodic runs.
 
-The current scope is intentionally narrow:
+Current scope:
 
 - discovery backends: `pct exec` for LXC, `qm agent network-get-interfaces` for VMs
-- address selection: IPv6-only, tuned for DNS AAAA
+- address selection: public IPv4 and global IPv6, with explicit ambiguity handling
+- static entries: direct IPv4, IPv6, or dual-stack values
 - DNS provider: Cloudflare only
 - operations model: workspace source files + rendered artifacts + state
 
@@ -15,6 +16,14 @@ The current scope is intentionally narrow:
 ```bash
 uv sync --python 3.11
 ```
+
+For local release builds and test tooling, sync the development dependencies:
+
+```bash
+uv sync --extra dev --python 3.11
+```
+
+See [Internal Release Workflow](docs/release.md) for local build, install, and verification steps.
 
 ## Quick start
 
@@ -35,6 +44,8 @@ printf '%s\n' 'YOUR_TOKEN' > ./workspaces/example-zone/secrets/cloudflare_api_to
 - `zone_name`
 - optional `zone_id`
 - `api_token_file` if you want a different token path
+- optional `paths` overrides if this workspace should use non-default `pct`, `qm`, `sh`, `systemctl`, or a non-default systemd unit directory
+- optional `arbor_ddns_logging` overrides if you want a different workspace log path, level, stream, or retention
 
 4. Add entries.
 
@@ -43,29 +54,50 @@ uv run arbor-ddns entry add lxc \
   --workspace ./workspaces/example-zone \
   --id 101 \
   --fqdn host.example.com \
-  --name web
+  --name web \
+  --family both
 
 uv run arbor-ddns entry add vm \
   --workspace ./workspaces/example-zone \
   --id 201 \
   --fqdn vm.example.com \
-  --name guest
+  --name guest \
+  --family ipv6
+
+uv run arbor-ddns entry add static \
+  --workspace ./workspaces/example-zone \
+  --fqdn edge.example.com \
+  --name edge \
+  --family both \
+  --ipv4 93.184.216.34 \
+  --ipv6 2408:8266:5003:506a::88
+```
+
+You can also change into the workspace and omit `--workspace` on all workspace-aware commands:
+
+```bash
+cd ./workspaces/example-zone
+uv run arbor-ddns entry list
 ```
 
 5. Validate and verify provider access.
 
 ```bash
-uv run arbor-ddns validate --workspace ./workspaces/example-zone
-uv run arbor-ddns provider verify --workspace ./workspaces/example-zone
+cd ./workspaces/example-zone
+uv run arbor-ddns validate
+uv run arbor-ddns provider verify
 ```
 
 6. Inspect the live DNS plan, then sync once.
 
 ```bash
 uv run arbor-ddns plan --workspace ./workspaces/example-zone
-uv run arbor-ddns sync-once --workspace ./workspaces/example-zone
-uv run arbor-ddns sync-once --workspace ./workspaces/example-zone --apply
+cd ./workspaces/example-zone
+uv run arbor-ddns sync-once
+uv run arbor-ddns sync-once --apply
 ```
+
+`family=both` is handled as two independent flows. One family may `create`, `update`, or `noop` while the other is skipped because discovery was ambiguous or had no usable candidate.
 
 7. Render artifacts or install systemd units.
 
@@ -76,21 +108,69 @@ uv run arbor-ddns apply --workspace ./workspaces/example-zone --run-sync
 ```
 
 `apply` writes or updates systemd units under `/etc/systemd/system` by default, so it typically needs root privileges.
+That target path is workspace-owned and can be changed with `workspace.yaml -> paths.systemd_unit_dir`.
+
+Outside a workspace, only low-level `discover` uses the package-shipped outside-workspace config, which provides fallback `pct`, `qm`, `sh`, and stderr logging defaults before any workspace context exists.
+
+## Runtime files
+
+Each workspace has a `runtime/` subtree for local operator artifacts:
+
+```text
+runtime/
+  logs/
+    arbor-ddns.log -> arbor-ddns-YYYY-MM-DD.log
+    arbor-ddns-YYYY-MM-DD.log
+  run/
+```
+
+`runtime/logs/arbor-ddns.log` is the stable operator-facing symlink. The actual file writes go to daily files, and old daily files are pruned by the configured retention window.
+
+The CLI still writes concise summaries to stdout and stderr. The workspace file log is additive and is useful for later inspection from the workspace itself.
+
+## Uninstall
+
+`uninstall` removes systemd installation artifacts and generated workspace runtime files without touching editable config or remote Cloudflare records.
+
+```bash
+cd ./workspaces/example-zone
+uv run arbor-ddns uninstall
+```
+
+Default uninstall removes:
+
+- installed service and timer units
+- `rendered/`
+- `runtime/`
+
+Default uninstall keeps:
+
+- `workspace.yaml`
+- `entries.yaml`
+- `secrets/`
+- `state/`
+
+If you want to remove the entire workspace directory too:
+
+```bash
+uv run arbor-ddns uninstall --workspace ./workspaces/example-zone --purge
+```
 
 ## Workspace commands
 
 - `arbor-ddns init <dir>`
-- `arbor-ddns validate --workspace <dir>`
-- `arbor-ddns render --workspace <dir>`
-- `arbor-ddns apply --workspace <dir>`
-- `arbor-ddns status --workspace <dir>`
-- `arbor-ddns doctor --workspace <dir>`
-- `arbor-ddns entry list|add|update|remove|enable|disable --workspace <dir>`
-- `arbor-ddns provider verify --workspace <dir>`
-- `arbor-ddns plan --workspace <dir>`
-- `arbor-ddns sync-once --workspace <dir> [--apply]`
-- `arbor-ddns discover lxc <id>`
-- `arbor-ddns discover vm <id>`
+- `arbor-ddns validate [--workspace <dir>]`
+- `arbor-ddns render [--workspace <dir>]`
+- `arbor-ddns apply [--workspace <dir>]`
+- `arbor-ddns uninstall [--workspace <dir>] [--purge]`
+- `arbor-ddns status [--workspace <dir>]`
+- `arbor-ddns doctor [--workspace <dir>]`
+- `arbor-ddns entry list|add|update|remove|enable|disable [--workspace <dir>]`
+- `arbor-ddns provider verify [--workspace <dir>]`
+- `arbor-ddns plan [--workspace <dir>]`
+- `arbor-ddns sync-once [--workspace <dir>] [--apply]`
+- `arbor-ddns discover lxc <id> [--family ipv4|ipv6|both] [--workspace <dir>]`
+- `arbor-ddns discover vm <id> [--family ipv4|ipv6|both] [--workspace <dir>]`
 
 ## Testing
 
@@ -99,6 +179,18 @@ uv run pytest
 uv run ruff check .
 uv run mypy src
 ```
+
+## Internal Release
+
+Local wheel and sdist build flow:
+
+```bash
+.venv/bin/python -m build
+pip install dist/arbor_ddns-1.0.0-py3-none-any.whl
+arbor-ddns --version
+```
+
+For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.0 release notes](docs/release-notes/1.0.0.md).
 
 ## Documentation
 
@@ -111,3 +203,5 @@ uv run mypy src
 - [DNS Sync](docs/dns_sync.md)
 - [systemd Integration](docs/systemd_integration.md)
 - [Development Constraints](docs/development_constraints.md)
+- [Internal Release Workflow](docs/release.md)
+- [Release Notes 1.0.0](docs/release-notes/1.0.0.md)

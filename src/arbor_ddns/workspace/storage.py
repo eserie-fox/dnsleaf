@@ -12,15 +12,13 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from arbor_ddns.config import AppConfig
+from arbor_ddns.config import load_scaffold_layout, load_scaffold_secrets_readme
 from arbor_ddns.workspace.models import (
     EntriesFile,
     ManagedRecordFile,
     ResolvedWorkspace,
-    WorkspaceApplyConfig,
     WorkspaceConfig,
     WorkspaceEntry,
-    WorkspaceSystemdConfig,
 )
 
 
@@ -75,6 +73,22 @@ class WorkspacePaths:
         return self.rendered_dir / "systemd"
 
     @property
+    def runtime_dir(self) -> Path:
+        return self.root / "runtime"
+
+    @property
+    def runtime_logs_dir(self) -> Path:
+        return self.runtime_dir / "logs"
+
+    @property
+    def runtime_run_dir(self) -> Path:
+        return self.runtime_dir / "run"
+
+    @property
+    def runtime_log_file(self) -> Path:
+        return self.runtime_logs_dir / "arbor-ddns.log"
+
+    @property
     def state_dir(self) -> Path:
         return self.root / "state"
 
@@ -91,7 +105,6 @@ class WorkspacePaths:
 class LoadedWorkspace:
     """Loaded workspace source config and resolved runtime view."""
 
-    app_config: AppConfig
     paths: WorkspacePaths
     workspace_config: WorkspaceConfig
     resolved_workspace: ResolvedWorkspace
@@ -105,9 +118,6 @@ class LoadedWorkspace:
 
 class WorkspaceStorage:
     """Load and scaffold workspace files."""
-
-    def __init__(self, app_config: AppConfig | None = None) -> None:
-        self._app_config = app_config or AppConfig.from_defaults()
 
     def paths_for(self, workspace_dir: str | Path) -> WorkspacePaths:
         """Return resolved paths for a workspace root."""
@@ -130,32 +140,11 @@ class WorkspaceStorage:
         else:
             paths.root.mkdir(parents=True, exist_ok=False)
 
-        paths.secrets_dir.mkdir(parents=True, exist_ok=True)
-        paths.rendered_systemd_dir.mkdir(parents=True, exist_ok=True)
-        paths.state_dir.mkdir(parents=True, exist_ok=True)
+        for directory in load_scaffold_layout().directories:
+            (paths.root / directory).mkdir(parents=True, exist_ok=True)
 
-        scaffold = self._app_config.workspace_scaffold
-        workspace_config = WorkspaceConfig(
-            config_version=scaffold.config_version,
-            workspace_name=paths.root.name,
-            provider=scaffold.provider,
-            zone_name=scaffold.zone_name,
-            zone_id=scaffold.zone_id,
-            api_token_file=scaffold.api_token_file,
-            default_ttl=scaffold.default_ttl,
-            default_proxied=scaffold.default_proxied,
-            systemd=WorkspaceSystemdConfig(
-                service_name=None,
-                timer_name=None,
-                on_boot_sec=scaffold.systemd.on_boot_sec,
-                on_unit_active_sec=scaffold.systemd.on_unit_active_sec,
-                run_sync_after_apply=scaffold.systemd.run_sync_after_apply,
-            ),
-            apply=WorkspaceApplyConfig(
-                prune_managed_records=scaffold.apply.prune_managed_records,
-            ),
-        )
-        entries_file = EntriesFile(config_version=1, entries=[])
+        workspace_config = WorkspaceConfig.scaffold_defaults(paths.root.name)
+        entries_file = EntriesFile.scaffold_defaults()
         dump_yaml_data(
             paths.workspace_file,
             workspace_config.model_dump(mode="json", exclude_none=True),
@@ -163,12 +152,7 @@ class WorkspaceStorage:
         dump_yaml_data(paths.entries_file, entries_file.model_dump(mode="json", exclude_none=True))
         atomic_write_text(
             paths.secrets_dir / "README.txt",
-            (
-                "Place secret material in this directory.\n\n"
-                "Recommended layout:\n"
-                "- secrets/cloudflare_api_token.txt\n\n"
-                "Do not commit real secrets to version control.\n"
-            ),
+            load_scaffold_secrets_readme(),
         )
         dump_json_data(
             paths.managed_records_file,
@@ -186,7 +170,6 @@ class WorkspaceStorage:
         entries_file = EntriesFile.model_validate(entries_payload)
         resolved_workspace = workspace_config.resolve(paths.root)
         return LoadedWorkspace(
-            app_config=self._app_config,
             paths=paths,
             workspace_config=workspace_config,
             resolved_workspace=resolved_workspace,
@@ -197,6 +180,11 @@ class WorkspaceStorage:
         """Load a workspace and validate runtime-resolved references."""
 
         loaded = self.load(workspace_dir)
+        return self.validate_loaded(loaded)
+
+    def validate_loaded(self, loaded: LoadedWorkspace) -> LoadedWorkspace:
+        """Validate runtime-resolved references for a previously loaded workspace."""
+
         provider_config = loaded.resolved_workspace.cloudflare_provider_config()
         provider_config.resolved_api_token()
         return loaded

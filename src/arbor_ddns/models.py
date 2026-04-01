@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from arbor_ddns.util.ip import normalize_ipv6
+from arbor_ddns.util.ip import normalize_ip, record_type_for_family
 
 
 class TargetKind(StrEnum):
@@ -14,6 +14,53 @@ class TargetKind(StrEnum):
 
     LXC = "lxc"
     VM = "vm"
+
+
+class EntrySourceKind(StrEnum):
+    """Supported workspace entry source kinds."""
+
+    LXC = "lxc"
+    VM = "vm"
+    STATIC = "static"
+
+    def to_target_kind(self) -> TargetKind:
+        """Return the dynamic discovery target kind."""
+
+        if self is EntrySourceKind.LXC:
+            return TargetKind.LXC
+        if self is EntrySourceKind.VM:
+            return TargetKind.VM
+        raise ValueError("static entries do not map to a discovery target")
+
+
+class IPAddressFamily(StrEnum):
+    """Concrete IP families supported by discovery and sync."""
+
+    IPV4 = "ipv4"
+    IPV6 = "ipv6"
+
+    @property
+    def record_type(self) -> str:
+        """Return the DNS record type for this family."""
+
+        return record_type_for_family(self.value)
+
+
+class EntryAddressFamily(StrEnum):
+    """Workspace entry family intent."""
+
+    IPV4 = "ipv4"
+    IPV6 = "ipv6"
+    BOTH = "both"
+
+    def concrete_families(self) -> tuple[IPAddressFamily, ...]:
+        """Return the concrete record families this entry manages."""
+
+        if self is EntryAddressFamily.IPV4:
+            return (IPAddressFamily.IPV4,)
+        if self is EntryAddressFamily.IPV6:
+            return (IPAddressFamily.IPV6,)
+        return (IPAddressFamily.IPV4, IPAddressFamily.IPV6)
 
 
 class TargetRef(BaseModel):
@@ -25,46 +72,13 @@ class TargetRef(BaseModel):
     id: int = Field(ge=1)
 
 
-class InventoryEntry(BaseModel):
-    """Legacy inventory entry kept for compatibility with older tests."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: TargetKind
-    id: int = Field(ge=1)
-    fqdn: str
-    provider: str
-    selection_policy: str
-    enabled: bool
-
-    @field_validator("fqdn", "selection_policy")
-    @classmethod
-    def _validate_non_empty(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("value must not be blank")
-        return stripped
-
-    @field_validator("provider")
-    @classmethod
-    def _validate_provider(cls, value: str) -> str:
-        stripped = value.strip()
-        if stripped != "cloudflare":
-            raise ValueError("inventory entries must use the cloudflare provider")
-        return stripped
-
-    def to_target_ref(self) -> TargetRef:
-        """Return the target identity for discovery."""
-
-        return TargetRef(kind=self.kind, id=self.id)
-
-
 class SelectedAddress(BaseModel):
-    """Address selected for DNS AAAA synchronization."""
+    """Address selected for DNS synchronization."""
 
     model_config = ConfigDict(extra="forbid")
 
     target: TargetRef
+    family: IPAddressFamily
     address: str
     prefix_length: int = Field(ge=0, le=128)
     interface: str
@@ -75,4 +89,16 @@ class SelectedAddress(BaseModel):
     @field_validator("address")
     @classmethod
     def _normalize_address(cls, value: str) -> str:
-        return normalize_ipv6(value)
+        return normalize_ip(value)
+
+    @model_validator(mode="after")
+    def _validate_prefix_for_family(self) -> SelectedAddress:
+        if self.family is IPAddressFamily.IPV4 and self.prefix_length > 32:
+            raise ValueError("ipv4 prefix length must be <= 32")
+        return self
+
+    @property
+    def record_type(self) -> str:
+        """Return the DNS record type for this selected address."""
+
+        return self.family.record_type

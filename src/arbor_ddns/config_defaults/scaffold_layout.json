@@ -1,0 +1,9 @@
+{
+  "directories": [
+    "secrets",
+    "rendered/systemd",
+    "runtime/logs",
+    "runtime/run",
+    "state"
+  ]
+}

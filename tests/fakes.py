@@ -6,7 +6,8 @@ from arbor_ddns.discovery.base import DiscoveryBackend
 from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult
 from arbor_ddns.dns.base import DNSProvider
 from arbor_ddns.dns.models import DNSRecord, PlannedChange, ProviderVerification
-from arbor_ddns.models import TargetRef
+from arbor_ddns.models import IPAddressFamily, TargetRef
+from arbor_ddns.util.process import CommandResult
 from arbor_ddns.workspace.models import SystemdUnitStatus
 from arbor_ddns.workspace.storage import WorkspacePaths
 
@@ -14,18 +15,29 @@ from arbor_ddns.workspace.storage import WorkspacePaths
 class FakeDiscoveryBackend(DiscoveryBackend):
     name = "fake_discovery"
 
+    def __init__(self, candidates: list[AddressCandidate] | None = None) -> None:
+        self._candidates = candidates or [
+            AddressCandidate(
+                family=IPAddressFamily.IPV4,
+                interface="eth0",
+                address="93.184.216.34",
+                prefix_length=32,
+                source=self.name,
+            ),
+            AddressCandidate(
+                family=IPAddressFamily.IPV6,
+                interface="eth0",
+                address="2408:8266:5003:506a::3d6",
+                prefix_length=128,
+                source=self.name,
+            ),
+        ]
+
     def discover(self, target: TargetRef) -> DiscoveryResult:
         return DiscoveryResult(
             target=target,
             backend=self.name,
-            candidates=[
-                AddressCandidate(
-                    interface="eth0",
-                    address="2408:8266:5003:506a::3d6",
-                    prefix_length=128,
-                    source=self.name,
-                )
-            ],
+            candidates=list(self._candidates),
         )
 
 
@@ -112,6 +124,10 @@ class FakeSystemdManager:
         self.daemon_reloaded = False
         self.enabled_timers: list[str] = []
         self.started_services: list[str] = []
+        self.stopped_services: list[str] = []
+        self.stopped_timers: list[str] = []
+        self.disabled_timers: list[str] = []
+        self.reset_failed_units: list[tuple[str, str]] = []
 
     def render_service_unit(self, workspace) -> str:
         return (
@@ -131,16 +147,90 @@ class FakeSystemdManager:
         self.installed_units.append((service_path, timer_path))
         return service_path, timer_path
 
-    def daemon_reload(self) -> None:
+    def daemon_reload(self, workspace, *, check: bool = True) -> CommandResult:
+        _ = workspace
         self.daemon_reloaded = True
+        return CommandResult(
+            args=("systemctl", "daemon-reload"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
-    def enable_restart_timer(self, timer_name: str) -> None:
+    def enable_restart_timer(self, workspace, timer_name: str) -> None:
+        _ = workspace
         self.enabled_timers.append(timer_name)
 
-    def start_service(self, service_name: str) -> None:
+    def start_service(self, workspace, service_name: str) -> None:
+        _ = workspace
         self.started_services.append(service_name)
 
-    def status(self, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
+    def stop_service(self, workspace, service_name: str, *, check: bool = False) -> CommandResult:
+        _ = workspace
+        self.stopped_services.append(service_name)
+        return CommandResult(
+            args=("systemctl", "stop", f"{service_name}.service"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def stop_timer(self, workspace, timer_name: str, *, check: bool = False) -> CommandResult:
+        _ = workspace
+        self.stopped_timers.append(timer_name)
+        return CommandResult(
+            args=("systemctl", "stop", f"{timer_name}.timer"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def disable_timer(
+        self,
+        workspace,
+        timer_name: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        _ = workspace
+        self.disabled_timers.append(timer_name)
+        return CommandResult(
+            args=("systemctl", "disable", f"{timer_name}.timer"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def reset_failed(
+        self,
+        workspace,
+        unit_name: str,
+        unit_kind: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        _ = workspace
+        self.reset_failed_units.append((unit_name, unit_kind))
+        return CommandResult(
+            args=("systemctl", "reset-failed", f"{unit_name}.{unit_kind}"),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def installed_unit_path(self, workspace, unit_name: str, unit_kind: str) -> Path:
+        _ = workspace
+        return self.unit_dir / f"{unit_name}.{unit_kind}"
+
+    def remove_installed_unit(self, workspace, unit_name: str, unit_kind: str) -> Path | None:
+        path = self.installed_unit_path(workspace, unit_name, unit_kind)
+        if not path.exists():
+            return None
+        path.unlink()
+        return path
+
+    def status(self, workspace, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
+        _ = workspace
         return SystemdUnitStatus(
             unit_name=f"{unit_name}.{unit_kind}",
             available=True,
@@ -151,8 +241,10 @@ class FakeSystemdManager:
             fragment_path=str(self.unit_dir / f"{unit_name}.{unit_kind}"),
         )
 
-    def systemctl_available(self) -> bool:
+    def systemctl_available(self, workspace) -> bool:
+        _ = workspace
         return True
 
-    def unit_dir_writable(self) -> bool:
+    def unit_dir_writable(self, workspace) -> bool:
+        _ = workspace
         return True

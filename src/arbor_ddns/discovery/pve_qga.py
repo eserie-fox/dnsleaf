@@ -10,7 +10,7 @@ from arbor_ddns.util.process import ProcessRunner, run_command
 
 
 class PVEQGADiscoveryBackend(DiscoveryBackend):
-    """Discover IPv6 addresses using the QEMU guest agent."""
+    """Discover IPv4 and IPv6 addresses using the QEMU guest agent."""
 
     name = "pve_qga"
 
@@ -34,4 +34,3 @@ class PVEQGADiscoveryBackend(DiscoveryBackend):
             return DiscoveryResult(target=target, backend=self.name, candidates=candidates)
         except Exception as exc:
             return DiscoveryResult(target=target, backend=self.name, error=str(exc))
-
