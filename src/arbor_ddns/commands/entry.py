@@ -263,6 +263,44 @@ def register(app: typer.Typer) -> None:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)
 
+    @entry_add_app.command("local")
+    def entry_add_local(
+        ctx: typer.Context,
+        fqdn: Annotated[str, typer.Option("--fqdn")],
+        name: Annotated[str, typer.Option("--name")],
+        family: EntryAddressFamily = common.FAMILY_OPTION,
+        workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
+        selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
+        ttl: Annotated[int | None, typer.Option("--ttl")] = None,
+        proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
+        description: Annotated[str | None, typer.Option("--description")] = None,
+    ) -> None:
+        """Add a dynamic local-host entry."""
+
+        try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-add-local"):
+                result = common.entry_service(ctx).add_entry(
+                    workspace,
+                    name=name,
+                    source_kind="local",
+                    fqdn=fqdn,
+                    family=family.value,
+                    selection_policy=selection_policy,
+                    ttl=ttl,
+                    proxied=proxied,
+                    description=description,
+                )
+        except Exception as exc:
+            common.exit_with_error(exc)
+        common.format_entry_mutation(result)
+
     @entry_add_app.command("static")
     def entry_add_static(
         ctx: typer.Context,

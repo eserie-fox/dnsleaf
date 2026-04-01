@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.discovery.base import DiscoveryBackend
+from arbor_ddns.discovery.local_ip import LocalIPDiscoveryBackend
 from arbor_ddns.discovery.models import DiscoveryResult, SelectionResult
 from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
 from arbor_ddns.discovery.pve_qga import PVEQGADiscoveryBackend
@@ -510,6 +511,8 @@ class SyncRunner:
         configured = self._discovery_backends.get(kind.value)
         if configured is not None:
             return configured
+        if kind is TargetKind.LOCAL:
+            return LocalIPDiscoveryBackend()
         if kind is TargetKind.LXC:
             if loaded_workspace is not None:
                 return PVELXCDiscoveryBackend(

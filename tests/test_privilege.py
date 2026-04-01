@@ -17,6 +17,7 @@ from arbor_ddns.commands._privilege import (
     command_args_from_ctx,
     ensure_root_privileges,
 )
+from arbor_ddns.models import TargetKind
 from arbor_ddns.workspace.entries import EntryService
 
 
@@ -313,6 +314,36 @@ def test_analyze_plan_root_requirements_ignores_static_entries_for_pve_reason(
         family="both",
         static_ipv4="93.184.216.34",
         static_ipv6="2408:8266:5003:506a::88",
+    )
+
+    reasons = privilege_analysis.analyze_plan_root_requirements(workspace)
+
+    assert "will execute PVE guest discovery via pct exec" not in reasons
+    assert "will execute PVE guest discovery via qm agent" not in reasons
+
+
+def test_analyze_discover_root_requirements_for_local_does_not_add_pve_reasons() -> None:
+    reasons = privilege_analysis.analyze_discover_root_requirements(
+        TargetKind.LOCAL,
+        workspace=None,
+    )
+
+    assert "will execute PVE guest discovery via pct exec" not in reasons
+    assert "will execute PVE guest discovery via qm agent" not in reasons
+
+
+def test_analyze_plan_root_requirements_ignores_local_entries_for_pve_reason(
+    tmp_path: Path,
+) -> None:
+    from tests.conftest import scaffold_workspace
+
+    workspace = scaffold_workspace(tmp_path)
+    EntryService().add_entry(
+        workspace,
+        name="self",
+        source_kind="local",
+        fqdn="self.example.com",
+        family="both",
     )
 
     reasons = privilege_analysis.analyze_plan_root_requirements(workspace)

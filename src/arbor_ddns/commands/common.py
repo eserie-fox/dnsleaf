@@ -22,7 +22,7 @@ from arbor_ddns.commands._privilege import (
 from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.dns.models import ProviderVerification
 from arbor_ddns.logging import workspace_logging_context
-from arbor_ddns.models import EntryAddressFamily
+from arbor_ddns.models import EntryAddressFamily, EntrySourceKind
 from arbor_ddns.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
 from arbor_ddns.workspace.entries import EntryService
 from arbor_ddns.workspace.models import (
@@ -295,9 +295,13 @@ def format_run_report(report: WorkspaceRunReport) -> None:
         actions = "-"
         if outcome.plan is not None:
             actions = ",".join(change.action for change in outcome.plan.changes)
+        source_descriptor = (
+            outcome.source_kind.value
+            if outcome.source_kind in {EntrySourceKind.STATIC, EntrySourceKind.LOCAL}
+            else f"{outcome.source_kind.value}/{outcome.source_id}"
+        )
         typer.echo(
-            f"entry={outcome.entry_name} source={outcome.source_kind.value}/"
-            f"{outcome.source_id if outcome.source_id is not None else '-'} "
+            f"entry={outcome.entry_name} source={source_descriptor} "
             f"fqdn={outcome.fqdn} family={outcome.family.value} type={outcome.record_type} "
             f"value_source={outcome.value_source} status={outcome.status} "
             f"selection={outcome.selection_status or '-'} selected={outcome.selected_value or '-'} "

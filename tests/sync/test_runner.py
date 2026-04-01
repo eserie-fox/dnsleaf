@@ -5,6 +5,7 @@ from pathlib import Path
 from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider
 
 from arbor_ddns.config import OutsideWorkspaceConfig
+from arbor_ddns.discovery.local_ip import LocalIPDiscoveryBackend
 from arbor_ddns.discovery.models import AddressCandidate
 from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
 from arbor_ddns.discovery.pve_qga import PVEQGADiscoveryBackend
@@ -235,10 +236,12 @@ def test_runner_uses_outside_workspace_paths_for_discovery_fallback() -> None:
     )
 
     lxc_backend = runner._backend_for_kind(TargetKind.LXC, loaded_workspace=None)
+    local_backend = runner._backend_for_kind(TargetKind.LOCAL, loaded_workspace=None)
     vm_backend = runner._backend_for_kind(TargetKind.VM, loaded_workspace=None)
 
     assert isinstance(lxc_backend, PVELXCDiscoveryBackend)
     assert lxc_backend._pct_bin == "/usr/sbin/pct"
     assert lxc_backend._shell_bin == "/bin/bash"
+    assert isinstance(local_backend, LocalIPDiscoveryBackend)
     assert isinstance(vm_backend, PVEQGADiscoveryBackend)
     assert vm_backend._qm_bin == "/usr/sbin/qm"

@@ -16,6 +16,10 @@ from arbor_ddns.logging import (
     load_workspace_logging_config,
     workspace_logging_context,
 )
+from arbor_ddns.logging import (
+    runtime as logging_runtime,
+)
+from arbor_ddns.logging.config import absolute_path_without_symlink_resolution
 from arbor_ddns.workspace.service import WorkspaceService
 from arbor_ddns.workspace.storage import WorkspaceLoadError
 
@@ -141,6 +145,22 @@ def test_load_workspace_logging_config_returns_resolved_config_without_mutating_
     assert list(root.handlers) == original_handlers
 
 
+def test_load_workspace_logging_config_preserves_stable_symlink_path_when_log_exists(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "lab"
+    WorkspaceService().init_workspace(workspace)
+    symlink = workspace / "runtime" / "logs" / "arbor-ddns.log"
+    daily_file = workspace / "runtime" / "logs" / "arbor-ddns-2026-04-01.log"
+    daily_file.parent.mkdir(parents=True, exist_ok=True)
+    daily_file.write_text("existing\n", encoding="utf-8")
+    symlink.symlink_to(daily_file)
+
+    _loaded, config = load_workspace_logging_config(workspace)
+
+    assert config.file_path == symlink
+
+
 def test_apply_logging_config_uses_supplied_runtime_config(tmp_path: Path) -> None:
     config = ResolvedLoggingConfig(
         level=logging.INFO,
@@ -157,6 +177,61 @@ def test_apply_logging_config_uses_supplied_runtime_config(tmp_path: Path) -> No
     symlink = tmp_path / "arbor-ddns.log"
     assert symlink.is_symlink()
     assert "applied from runtime config" in symlink.resolve().read_text(encoding="utf-8")
+
+
+def test_apply_logging_config_reapply_keeps_stable_symlink_name(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fixed_now = datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC)
+
+    class FixedNowDailySymlinkFileHandler(DailySymlinkFileHandler):
+        def __init__(
+            self,
+            symlink_path,
+            *,
+            retention_days=7,
+            encoding="utf-8",
+            now_func=None,
+        ) -> None:
+            _ = now_func
+            super().__init__(
+                symlink_path,
+                retention_days=retention_days,
+                encoding=encoding,
+                now_func=lambda: fixed_now,
+            )
+
+    monkeypatch.setattr(
+        logging_runtime,
+        "DailySymlinkFileHandler",
+        FixedNowDailySymlinkFileHandler,
+    )
+    config = ResolvedLoggingConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        file_path=tmp_path / "arbor-ddns.log",
+        retention_days=7,
+        stream="none",
+    )
+
+    with _restore_root_logger():
+        apply_logging_config(config, close_existing=True)
+        logging.getLogger("arbor_ddns.test").info("first write")
+        apply_logging_config(config, close_existing=True)
+        logging.getLogger("arbor_ddns.test").info("second write")
+
+    symlink = tmp_path / "arbor-ddns.log"
+    dated_file = tmp_path / "arbor-ddns-2026-04-01.log"
+    duplicate_file = tmp_path / "arbor-ddns-2026-04-01-2026-04-01.log"
+
+    assert symlink.is_symlink()
+    assert symlink == tmp_path / "arbor-ddns.log"
+    assert symlink.resolve() == dated_file.resolve()
+    assert dated_file.exists()
+    assert duplicate_file.exists() is False
+    assert "first write" in dated_file.read_text(encoding="utf-8")
+    assert "second write" in dated_file.read_text(encoding="utf-8")
 
 
 def test_workspace_logging_context_uses_workspace_file_without_default_stderr_output(
@@ -195,3 +270,28 @@ def test_workspace_logging_context_fails_fast_for_missing_workspace_config(tmp_p
                 command_name="plan",
             ):
                 pass
+
+
+def test_absolute_path_without_symlink_resolution_uses_base_dir_for_relative_paths(
+    tmp_path: Path,
+) -> None:
+    path = absolute_path_without_symlink_resolution(
+        "runtime/logs/arbor-ddns.log",
+        base_dir=tmp_path / "lab",
+    )
+
+    assert path == tmp_path / "lab" / "runtime" / "logs" / "arbor-ddns.log"
+
+
+def test_absolute_path_without_symlink_resolution_preserves_existing_symlink_name(
+    tmp_path: Path,
+) -> None:
+    symlink = tmp_path / "arbor-ddns.log"
+    dated_file = tmp_path / "arbor-ddns-2026-04-01.log"
+    dated_file.write_text("existing\n", encoding="utf-8")
+    symlink.symlink_to(dated_file)
+
+    path = absolute_path_without_symlink_resolution(symlink)
+
+    assert path == symlink
+    assert path != symlink.resolve()

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2 - 2026-04-01
+
+`arbor-ddns` 1.0.2 is ready for internal patch-release use on a local machine.
+
+- added `local` as a first-class dynamic source kind for host-local IP discovery
+- fixed workspace daily log naming so the stable `arbor-ddns.log` symlink path does not accumulate repeated date suffixes
+- aligned help text, documentation, release notes, tests, and version metadata for the 1.0.2 release-prep pass
+
 ## 1.0.1 - 2026-04-01
 
 `arbor-ddns` 1.0.1 is ready for internal patch-release use on a local machine.

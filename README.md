@@ -1,11 +1,11 @@
 # arbor-ddns
 
-`arbor-ddns` is a lightweight, workspace-driven DDNS tool for PVE guests and static IP targets.
-It discovers guest IPv4 and IPv6 addresses from the PVE host, selects publishable dynamic candidates, syncs `A` and `AAAA` records to Cloudflare, and can install a systemd timer for periodic runs.
+`arbor-ddns` is a lightweight, workspace-driven DDNS tool for dynamic and static IP targets.
+It discovers IPv4 and IPv6 addresses from PVE guests or the local host, selects publishable dynamic candidates, syncs `A` and `AAAA` records to Cloudflare, and can install a systemd timer for periodic runs.
 
 Current scope:
 
-- discovery backends: `pct exec` for LXC, `qm agent network-get-interfaces` for VMs
+- discovery backends: `pct exec` for LXC, `qm agent network-get-interfaces` for VMs, and host-local `ip -o addr show`
 - address selection: public IPv4 and global IPv6, with explicit ambiguity handling
 - static entries: direct IPv4, IPv6, or dual-stack values
 - DNS provider: Cloudflare only
@@ -63,6 +63,12 @@ arbor-ddns entry add vm \
   --fqdn vm.example.com \
   --name guest \
   --family ipv6
+
+arbor-ddns entry add local \
+  --workspace ./workspaces/example-zone \
+  --fqdn self.example.com \
+  --name self \
+  --family both
 
 arbor-ddns entry add static \
   --workspace ./workspaces/example-zone \
@@ -129,6 +135,7 @@ Examples:
 arbor-ddns apply --workspace ./workspaces/example-zone --sudo
 arbor-ddns plan --workspace ./workspaces/example-zone --sudo
 arbor-ddns discover lxc 101 --sudo
+arbor-ddns discover local --workspace ./workspaces/example-zone --sudo
 ```
 
 ## Runtime files
@@ -192,6 +199,7 @@ arbor-ddns uninstall --workspace ./workspaces/example-zone --purge
 - `arbor-ddns sync-once [--workspace <dir>] [--apply]`
 - `arbor-ddns discover lxc <id> [--family ipv4|ipv6|both] [--workspace <dir>]`
 - `arbor-ddns discover vm <id> [--family ipv4|ipv6|both] [--workspace <dir>]`
+- `arbor-ddns discover local [--family ipv4|ipv6|both] [--workspace <dir>]`
 
 ## Testing
 
@@ -207,11 +215,11 @@ Local wheel and sdist build flow:
 
 ```bash
 python -m build
-pip install dist/arbor_ddns-1.0.1-py3-none-any.whl
+pip install dist/arbor_ddns-1.0.2-py3-none-any.whl
 arbor-ddns --version
 ```
 
-For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.1 release notes](docs/release-notes/1.0.1.md).
+For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.2 release notes](docs/release-notes/1.0.2.md).
 
 ## Documentation
 
@@ -225,4 +233,4 @@ For the full internal release checklist, see [docs/release.md](docs/release.md) 
 - [systemd Integration](docs/systemd_integration.md)
 - [Development Constraints](docs/development_constraints.md)
 - [Internal Release Workflow](docs/release.md)
-- [Release Notes 1.0.1](docs/release-notes/1.0.1.md)
+- [Release Notes 1.0.2](docs/release-notes/1.0.2.md)

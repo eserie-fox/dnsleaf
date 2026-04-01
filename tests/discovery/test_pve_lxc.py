@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from arbor_ddns.discovery.parser import parse_lxc_ip_addr_output
+from arbor_ddns.discovery.parser import parse_ip_addr_output, parse_lxc_ip_addr_output
 from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
 from arbor_ddns.models import TargetKind, TargetRef
 from arbor_ddns.util.process import CommandResult
@@ -55,7 +55,7 @@ def test_pve_lxc_backend_tolerates_wrapped_ip_output_lines() -> None:
     assert result.candidates[0].flags == ["dynamic"]
 
 
-def test_parse_lxc_ip_addr_output_handles_multiline_ip_addr_show_style() -> None:
+def test_parse_ip_addr_output_handles_multiline_ip_addr_show_style() -> None:
     sample_output = """
 2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
     inet 93.184.216.34/32 scope global dynamic eth0
@@ -67,7 +67,7 @@ def test_parse_lxc_ip_addr_output_handles_multiline_ip_addr_show_style() -> None
        valid_lft forever preferred_lft forever
 """.strip()
 
-    candidates = parse_lxc_ip_addr_output(sample_output)
+    candidates = parse_ip_addr_output(sample_output)
 
     assert [candidate.cidr for candidate in candidates] == [
         "93.184.216.34/32",
@@ -76,3 +76,7 @@ def test_parse_lxc_ip_addr_output_handles_multiline_ip_addr_show_style() -> None
     ]
     assert candidates[0].flags == ["dynamic"]
     assert candidates[1].flags == ["dynamic", "mngtmpaddr"]
+    assert parse_lxc_ip_addr_output(sample_output) == parse_ip_addr_output(
+        sample_output,
+        source="pve_lxc",
+    )

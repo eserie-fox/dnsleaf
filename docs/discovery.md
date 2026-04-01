@@ -1,6 +1,16 @@
 # Discovery
 
-Discovery is responsible for gathering candidate addresses from PVE guests. It never writes DNS state directly.
+Discovery is responsible for gathering candidate addresses from dynamic targets. It never writes DNS state directly.
+
+## Local backend
+
+The local backend runs on the machine currently executing arbor-ddns:
+
+```text
+ip -o addr show
+```
+
+It discovers host-local IPv4 and IPv6 candidates without requiring a fake guest id.
 
 ## LXC backend
 
@@ -10,7 +20,9 @@ The LXC backend runs:
 pct exec <ctid> -- sh -lc "ip -o addr show"
 ```
 
-The output is parsed into normalized IPv4 and IPv6 candidates with:
+The output is parsed with the same generic Linux `ip -o addr show` parser used by local discovery.
+
+Parsed candidates keep:
 
 - interface
 - address

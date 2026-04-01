@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
+from arbor_ddns.models import EntrySourceKind, TargetKind
 from arbor_ddns.workspace.entries import EntryService
+from arbor_ddns.workspace.models import WorkspaceEntry
 
 
 def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Path) -> None:
@@ -77,3 +82,118 @@ def test_entry_add_and_update_static_entry(workspace_dir: Path) -> None:
     assert updated.entry is not None
     assert updated.entry.family.value == "ipv4"
     assert updated.entry.static_ipv4 == "8.8.8.8"
+
+
+def test_entry_add_local_entry(workspace_dir: Path) -> None:
+    service = EntryService()
+
+    added = service.add_entry(
+        workspace_dir,
+        name="self",
+        source_kind="local",
+        fqdn="self.example.com",
+        family="ipv6",
+    )
+
+    assert added.entry is not None
+    assert added.entry.source_kind is EntrySourceKind.LOCAL
+    assert added.entry.selection_policy == "default"
+    assert added.entry.source_id is None
+
+
+def test_workspace_entry_local_requires_selection_policy() -> None:
+    with pytest.raises(ValidationError, match="dynamic local entries require selection_policy"):
+        WorkspaceEntry(
+            name="self",
+            source_kind="local",
+            fqdn="self.example.com",
+            family="ipv6",
+            enabled=True,
+        )
+
+
+def test_workspace_entry_local_forbids_source_id() -> None:
+    with pytest.raises(ValidationError, match="dynamic local entries must not define source_id"):
+        WorkspaceEntry(
+            name="self",
+            source_kind="local",
+            source_id=101,
+            fqdn="self.example.com",
+            family="ipv6",
+            selection_policy="default",
+            enabled=True,
+        )
+
+
+def test_workspace_entry_local_forbids_static_values() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="dynamic local entries must not define static IP values",
+    ):
+        WorkspaceEntry(
+            name="self",
+            source_kind="local",
+            fqdn="self.example.com",
+            family="ipv4",
+            selection_policy="default",
+            enabled=True,
+            static_ipv4="93.184.216.34",
+        )
+
+
+def test_workspace_entry_local_converts_to_local_target_ref() -> None:
+    entry = WorkspaceEntry(
+        name="self",
+        source_kind="local",
+        fqdn="self.example.com",
+        family="ipv6",
+        selection_policy="default",
+        enabled=True,
+    )
+
+    target = entry.to_target_ref()
+
+    assert target.kind is TargetKind.LOCAL
+    assert target.id is None
+
+
+def test_workspace_entry_source_descriptor_formats_static_local_and_guest_targets() -> None:
+    static_entry = WorkspaceEntry(
+        name="edge",
+        source_kind="static",
+        fqdn="edge.example.com",
+        family="ipv4",
+        enabled=True,
+        static_ipv4="93.184.216.34",
+    )
+    local_entry = WorkspaceEntry(
+        name="self",
+        source_kind="local",
+        fqdn="self.example.com",
+        family="ipv6",
+        enabled=True,
+        selection_policy="default",
+    )
+    lxc_entry = WorkspaceEntry(
+        name="web",
+        source_kind="lxc",
+        source_id=101,
+        fqdn="web.example.com",
+        family="ipv6",
+        enabled=True,
+        selection_policy="default",
+    )
+    vm_entry = WorkspaceEntry(
+        name="guest",
+        source_kind="vm",
+        source_id=201,
+        fqdn="guest.example.com",
+        family="ipv6",
+        enabled=True,
+        selection_policy="default",
+    )
+
+    assert static_entry.source_descriptor == "static"
+    assert local_entry.source_descriptor == "local"
+    assert lxc_entry.source_descriptor == "lxc/101"
+    assert vm_entry.source_descriptor == "vm/201"
