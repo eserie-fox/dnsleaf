@@ -36,21 +36,21 @@ Validation rules:
 ### List entries
 
 ```bash
-uv run arbor-ddns entry list --workspace ./workspaces/example-zone
-cd ./workspaces/example-zone && uv run arbor-ddns entry list
+arbor-ddns entry list --workspace ./workspaces/example-zone
+cd ./workspaces/example-zone && arbor-ddns entry list
 ```
 
 ### Add dynamic entries
 
 ```bash
-uv run arbor-ddns entry add lxc --workspace ./workspaces/example-zone --id 101 --fqdn host.example.com --name web --family both
-uv run arbor-ddns entry add vm  --workspace ./workspaces/example-zone --id 201 --fqdn vm.example.com   --name guest --family ipv6
+arbor-ddns entry add lxc --workspace ./workspaces/example-zone --id 101 --fqdn host.example.com --name web --family both
+arbor-ddns entry add vm  --workspace ./workspaces/example-zone --id 201 --fqdn vm.example.com   --name guest --family ipv6
 ```
 
 ### Add static entries
 
 ```bash
-uv run arbor-ddns entry add static \
+arbor-ddns entry add static \
   --workspace ./workspaces/example-zone \
   --fqdn edge.example.com \
   --name edge \
@@ -62,21 +62,21 @@ uv run arbor-ddns entry add static \
 ### Update entries
 
 ```bash
-uv run arbor-ddns entry update web --workspace ./workspaces/example-zone --family ipv4 --ttl 60
-uv run arbor-ddns entry update edge --workspace ./workspaces/example-zone --ipv6 2408:8266:5003:506a::99
+arbor-ddns entry update web --workspace ./workspaces/example-zone --family ipv4 --ttl 60
+arbor-ddns entry update edge --workspace ./workspaces/example-zone --ipv6 2408:8266:5003:506a::99
 ```
 
 ### Enable or disable
 
 ```bash
-uv run arbor-ddns entry enable web --workspace ./workspaces/example-zone
-uv run arbor-ddns entry disable web --workspace ./workspaces/example-zone
+arbor-ddns entry enable web --workspace ./workspaces/example-zone
+arbor-ddns entry disable web --workspace ./workspaces/example-zone
 ```
 
 ### Remove
 
 ```bash
-uv run arbor-ddns entry remove web --workspace ./workspaces/example-zone
+arbor-ddns entry remove web --workspace ./workspaces/example-zone
 ```
 
 ## Safety semantics

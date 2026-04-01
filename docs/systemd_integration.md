@@ -26,6 +26,8 @@ The service executes one sync cycle for the workspace:
 arbor-ddns sync-once --workspace <abs-workspace> --apply
 ```
 
+If the console script is unavailable in the runtime environment, the generated unit falls back to `python -m arbor_ddns ...`. This matches the same module entrypoint used by the CLI `--sudo` fallback.
+
 ## Apply behavior
 
 `apply` performs:
@@ -40,6 +42,14 @@ arbor-ddns sync-once --workspace <abs-workspace> --apply
 8. optionally run one immediate sync
 
 `apply` does not uninstall or delete remote records. It only installs or refreshes the local systemd integration and optionally runs a sync.
+
+`apply` usually needs root privileges because it writes system-level unit files and invokes `systemctl`. If you are not root but do have `sudo`, prefer:
+
+```bash
+arbor-ddns apply --workspace <workspace> --sudo
+```
+
+This keeps the current command shape and re-executes it through the current Python environment, which is safer than assuming plain `sudo arbor-ddns ...` will resolve the same script.
 
 ## Naming
 
@@ -77,7 +87,7 @@ runtime/logs/arbor-ddns.log -> runtime/logs/arbor-ddns-YYYY-MM-DD.log
 
 The stable symlink points to the current daily file, and older daily files are pruned by the configured retention window.
 
-This file log is additive to normal stdout and stderr output. When the workspace timer runs under systemd, journal output still works as usual.
+This file log is the default destination for workspace logger output. Any normal stdout or stderr emitted by the command can still be captured by the systemd journal.
 
 ## Uninstall behavior
 

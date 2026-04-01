@@ -5,12 +5,12 @@ This document is for local builds and installs on your own machines. It does not
 ## Prerequisites
 
 - Python 3.11 or newer
-- `uv` for creating and syncing the local virtual environment
+- `pip`
 
 Install development tooling so `build`, `pytest`, `ruff`, and `mypy` are available:
 
 ```bash
-uv sync --extra dev --python 3.11
+pip install -e '.[dev]'
 ```
 
 ## Build artifacts
@@ -18,20 +18,20 @@ uv sync --extra dev --python 3.11
 Create a source distribution and wheel from the current checkout:
 
 ```bash
-.venv/bin/python -m build
+python -m build
 ```
 
 Expected outputs:
 
-- `dist/arbor_ddns-1.0.0.tar.gz`
-- `dist/arbor_ddns-1.0.0-py3-none-any.whl`
+- `dist/arbor_ddns-1.0.1.tar.gz`
+- `dist/arbor_ddns-1.0.1-py3-none-any.whl`
 
 ## Local install
 
 Install the built wheel into the target environment:
 
 ```bash
-pip install dist/arbor_ddns-1.0.0-py3-none-any.whl
+pip install dist/arbor_ddns-1.0.1-py3-none-any.whl
 ```
 
 If you are reinstalling over an older local build, use your normal `pip install --force-reinstall ...` workflow.
@@ -47,7 +47,7 @@ arbor-ddns --version
 Expected output:
 
 ```text
-1.0.0
+1.0.1
 ```
 
 ## Minimal smoke test
@@ -69,5 +69,6 @@ To validate a real workspace end-to-end:
 
 ## Release notes
 
+- [1.0.1 release notes](release-notes/1.0.1.md)
 - [1.0.0 release notes](release-notes/1.0.0.md)
 - [Changelog](../CHANGELOG.md)

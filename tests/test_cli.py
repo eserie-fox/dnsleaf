@@ -5,8 +5,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from arbor_ddns import cli
+from arbor_ddns import __version__, cli
 from arbor_ddns.commands import common
+from arbor_ddns.commands._privilege import PermissionOperationError
 from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult, SelectionResult
 from arbor_ddns.dns.models import ProviderVerification
@@ -409,6 +410,7 @@ def test_plan_command_uses_record_outcomes(monkeypatch) -> None:
 
 def test_discover_command_reports_both_families(monkeypatch) -> None:
     monkeypatch.setattr(common, "debug_runner", lambda ctx: FakeDebugRunner())
+    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: False)
 
     result = runner.invoke(cli.app, ["discover", "lxc", "101", "--family", "both"])
 
@@ -433,6 +435,115 @@ def test_root_help_does_not_expose_config_option() -> None:
 
     assert result.exit_code == 0
     assert "--config" not in result.stdout
+
+
+def test_version_option_reports_package_version() -> None:
+    result = runner.invoke(cli.app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.output == f"{__version__}\n"
+
+
+def test_entry_group_without_subcommand_shows_help() -> None:
+    result = runner.invoke(cli.app, ["entry"])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
+    assert "Manage workspace entries." in result.output
+    assert "Missing command" not in result.output
+
+
+def test_entry_add_group_without_subcommand_shows_help() -> None:
+    result = runner.invoke(cli.app, ["entry", "add"])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
+    assert "Add a new workspace entry." in result.output
+    assert "Missing command" not in result.output
+
+
+def test_provider_group_without_subcommand_shows_help() -> None:
+    result = runner.invoke(cli.app, ["provider"])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
+    assert "Provider-specific operations." in result.output
+    assert "Missing command" not in result.output
+
+
+def test_discover_group_without_subcommand_shows_help() -> None:
+    result = runner.invoke(cli.app, ["discover"])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
+    assert "Run low-level discovery/debug commands." in result.output
+    assert "Missing command" not in result.output
+
+
+def test_apply_fails_fast_when_privileges_are_required(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_enforce(*args, **kwargs) -> bool:
+        raise PermissionOperationError(
+            "apply requires elevated privileges:\n"
+            "- will manage system services via systemctl\n"
+            "Retry with: arbor-ddns apply --workspace /tmp/lab --sudo"
+        )
+
+    monkeypatch.setattr(common, "enforce_root_privileges", fake_enforce)
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: calls.append("service"))
+
+    result = runner.invoke(cli.app, ["apply", "--workspace", "/tmp/lab"])
+
+    assert result.exit_code == 1
+    assert "requires elevated privileges" in result.output
+    assert "systemctl" in result.output
+    assert "--sudo" in result.output
+    assert calls == []
+
+
+def test_apply_sudo_reexec_returns_before_service(monkeypatch) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: True)
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: calls.append("service"))
+
+    result = runner.invoke(cli.app, ["apply", "--workspace", "/tmp/lab", "--sudo"])
+
+    assert result.exit_code == 0
+    assert calls == []
+
+
+def test_plan_and_discover_accept_sudo_option(monkeypatch) -> None:
+    calls: list[tuple[str, bool]] = []
+
+    def fake_enforce(ctx, *, reasons, sudo_requested):
+        calls.append((common.command_operation(ctx), sudo_requested))
+        return True
+
+    monkeypatch.setattr(common, "enforce_root_privileges", fake_enforce)
+
+    plan_result = runner.invoke(cli.app, ["plan", "--workspace", "/tmp/lab", "--sudo"])
+    discover_result = runner.invoke(cli.app, ["discover", "lxc", "101", "--sudo"])
+
+    assert plan_result.exit_code == 0
+    assert discover_result.exit_code == 0
+    assert calls == [("plan", True), ("discover lxc", True)]
+
+
+def test_validate_json_privilege_error_returns_json(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        common,
+        "enforce_root_privileges",
+        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionOperationError("need root")),
+    )
+
+    result = runner.invoke(cli.app, ["validate", "--json"])
+
+    assert result.exit_code == 1
+    assert '"ok": false' in result.output
+    assert '"error": "need root"' in result.output
 
 
 def test_root_callback_uses_outside_workspace_config_and_configures_default_logging(

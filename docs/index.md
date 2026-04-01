@@ -19,4 +19,4 @@ Documents:
 - [systemd Integration](systemd_integration.md)
 - [Development Constraints](development_constraints.md)
 - [Internal Release Workflow](release.md)
-- [Release Notes 1.0.0](release-notes/1.0.0.md)
+- [Release Notes 1.0.1](release-notes/1.0.1.md)

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1 - 2026-04-01
+
+`arbor-ddns` 1.0.1 is ready for internal patch-release use on a local machine.
+
+- improved `--sudo` re-exec behavior for non-root operators working from `.venv` or similar Python-managed installs
+- preserved explicit negative flag semantics during sudo re-exec and tightened argument reconstruction fail-fast boundaries
+- made QGA discovery parsing more tolerant of partial bad interface data without masking malformed top-level payloads
+- unified Python module fallback usage around `python -m arbor_ddns` for CLI and systemd execution paths
+- updated operator documentation, release notes, and tests to match the finalized 1.0.1 behavior
+
 ## 1.0.0 - 2026-04-01
 
 `arbor-ddns` is ready for internal 1.0.0 use on a local machine.

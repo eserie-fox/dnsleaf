@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from arbor_ddns.commands import _privilege_analysis as privilege_analysis
 from arbor_ddns.commands import common
 from arbor_ddns.models import EntryAddressFamily
 
@@ -14,20 +15,45 @@ from arbor_ddns.models import EntryAddressFamily
 def register(app: typer.Typer) -> None:
     """Register `entry` commands."""
 
-    entry_app = typer.Typer(help="Manage workspace entries.")
-    entry_add_app = typer.Typer(help="Add a new workspace entry.")
+    entry_app = typer.Typer(
+        help="Manage workspace entries.",
+        invoke_without_command=True,
+    )
+    entry_add_app = typer.Typer(
+        help="Add a new workspace entry.",
+        invoke_without_command=True,
+    )
     entry_app.add_typer(entry_add_app, name="add")
     app.add_typer(entry_app, name="entry")
+
+    @entry_app.callback()
+    def entry_callback(ctx: typer.Context) -> None:
+        if ctx.invoked_subcommand is None:
+            typer.echo(ctx.get_help())
+            raise typer.Exit()
+
+    @entry_add_app.callback()
+    def entry_add_callback(ctx: typer.Context) -> None:
+        if ctx.invoked_subcommand is None:
+            typer.echo(ctx.get_help())
+            raise typer.Exit()
 
     @entry_app.command("list")
     def entry_list_command(
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """List workspace entries."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_list_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-list"):
                 entries = common.entry_service(ctx).list_entries(workspace)
         except Exception as exc:
@@ -47,6 +73,7 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         fqdn: Annotated[str | None, typer.Option("--fqdn")] = None,
         family: EntryAddressFamily | None = None,
         selection_policy: Annotated[str | None, typer.Option("--selection-policy")] = None,
@@ -61,6 +88,12 @@ def register(app: typer.Typer) -> None:
         """Update a workspace entry."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-update"):
                 result = common.entry_service(ctx).update_entry(
                     workspace,
@@ -85,10 +118,17 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Remove a workspace entry."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-remove"):
                 result = common.entry_service(ctx).remove_entry(workspace, name=name)
         except Exception as exc:
@@ -100,10 +140,17 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Enable a workspace entry."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-enable"):
                 result = common.entry_service(ctx).set_enabled(workspace, name=name, enabled=True)
         except Exception as exc:
@@ -115,10 +162,17 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Disable a workspace entry."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-disable"):
                 result = common.entry_service(ctx).set_enabled(
                     workspace,
@@ -137,6 +191,7 @@ def register(app: typer.Typer) -> None:
         name: Annotated[str, typer.Option("--name")],
         family: EntryAddressFamily = common.FAMILY_OPTION,
         workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
         ttl: Annotated[int | None, typer.Option("--ttl")] = None,
         proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
@@ -145,6 +200,12 @@ def register(app: typer.Typer) -> None:
         """Add a dynamic LXC entry."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-add-lxc"):
                 result = common.entry_service(ctx).add_entry(
                     workspace,
@@ -170,6 +231,7 @@ def register(app: typer.Typer) -> None:
         name: Annotated[str, typer.Option("--name")],
         family: EntryAddressFamily = common.FAMILY_OPTION,
         workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
         ttl: Annotated[int | None, typer.Option("--ttl")] = None,
         proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
@@ -178,6 +240,12 @@ def register(app: typer.Typer) -> None:
         """Add a dynamic VM entry."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-add-vm"):
                 result = common.entry_service(ctx).add_entry(
                     workspace,
@@ -202,6 +270,7 @@ def register(app: typer.Typer) -> None:
         name: Annotated[str, typer.Option("--name")],
         family: EntryAddressFamily = common.FAMILY_OPTION,
         workspace: Path = common.WORKSPACE_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         static_ipv4: Annotated[str | None, typer.Option("--ipv4")] = None,
         static_ipv6: Annotated[str | None, typer.Option("--ipv6")] = None,
         ttl: Annotated[int | None, typer.Option("--ttl")] = None,
@@ -211,6 +280,12 @@ def register(app: typer.Typer) -> None:
         """Add a static IP entry."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_entry_write_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="entry-add-static"):
                 result = common.entry_service(ctx).add_entry(
                     workspace,

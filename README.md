@@ -14,13 +14,13 @@ Current scope:
 ## Install
 
 ```bash
-uv sync --python 3.11
+pip install .
 ```
 
-For local release builds and test tooling, sync the development dependencies:
+For local development, testing, and release builds, install the editable package with development extras:
 
 ```bash
-uv sync --extra dev --python 3.11
+pip install -e '.[dev]'
 ```
 
 See [Internal Release Workflow](docs/release.md) for local build, install, and verification steps.
@@ -30,7 +30,7 @@ See [Internal Release Workflow](docs/release.md) for local build, install, and v
 1. Initialize a workspace.
 
 ```bash
-uv run arbor-ddns init ./workspaces/example-zone
+arbor-ddns init ./workspaces/example-zone
 ```
 
 2. Put a Cloudflare API token into the workspace.
@@ -50,21 +50,21 @@ printf '%s\n' 'YOUR_TOKEN' > ./workspaces/example-zone/secrets/cloudflare_api_to
 4. Add entries.
 
 ```bash
-uv run arbor-ddns entry add lxc \
+arbor-ddns entry add lxc \
   --workspace ./workspaces/example-zone \
   --id 101 \
   --fqdn host.example.com \
   --name web \
   --family both
 
-uv run arbor-ddns entry add vm \
+arbor-ddns entry add vm \
   --workspace ./workspaces/example-zone \
   --id 201 \
   --fqdn vm.example.com \
   --name guest \
   --family ipv6
 
-uv run arbor-ddns entry add static \
+arbor-ddns entry add static \
   --workspace ./workspaces/example-zone \
   --fqdn edge.example.com \
   --name edge \
@@ -77,24 +77,24 @@ You can also change into the workspace and omit `--workspace` on all workspace-a
 
 ```bash
 cd ./workspaces/example-zone
-uv run arbor-ddns entry list
+arbor-ddns entry list
 ```
 
 5. Validate and verify provider access.
 
 ```bash
 cd ./workspaces/example-zone
-uv run arbor-ddns validate
-uv run arbor-ddns provider verify
+arbor-ddns validate
+arbor-ddns provider verify
 ```
 
 6. Inspect the live DNS plan, then sync once.
 
 ```bash
-uv run arbor-ddns plan --workspace ./workspaces/example-zone
+arbor-ddns plan --workspace ./workspaces/example-zone
 cd ./workspaces/example-zone
-uv run arbor-ddns sync-once
-uv run arbor-ddns sync-once --apply
+arbor-ddns sync-once
+arbor-ddns sync-once --apply
 ```
 
 `family=both` is handled as two independent flows. One family may `create`, `update`, or `noop` while the other is skipped because discovery was ambiguous or had no usable candidate.
@@ -102,15 +102,34 @@ uv run arbor-ddns sync-once --apply
 7. Render artifacts or install systemd units.
 
 ```bash
-uv run arbor-ddns render --workspace ./workspaces/example-zone
-uv run arbor-ddns apply --workspace ./workspaces/example-zone
-uv run arbor-ddns apply --workspace ./workspaces/example-zone --run-sync
+arbor-ddns render --workspace ./workspaces/example-zone
+arbor-ddns apply --workspace ./workspaces/example-zone --sudo
+arbor-ddns apply --workspace ./workspaces/example-zone --run-sync
 ```
 
-`apply` writes or updates systemd units under `/etc/systemd/system` by default, so it typically needs root privileges.
+`apply` writes or updates systemd units under `/etc/systemd/system` by default, so it typically needs root privileges. If you are not root but do have `sudo`, prefer `arbor-ddns ... --sudo` over rewriting the command manually as `sudo arbor-ddns ...`.
 That target path is workspace-owned and can be changed with `workspace.yaml -> paths.systemd_unit_dir`.
 
 Outside a workspace, only low-level `discover` uses the package-shipped outside-workspace config, which provides fallback `pct`, `qm`, `sh`, and stderr logging defaults before any workspace context exists.
+
+## Privileges And `--sudo`
+
+Use `--sudo` when:
+
+- you are not running as root
+- the command really needs root privileges
+- you do have `sudo`
+- arbor-ddns is installed from a virtualenv, uv-managed environment, or another Python environment where plain `sudo arbor-ddns ...` may not find the same script or interpreter
+
+`arbor-ddns ... --sudo` re-executes the current command through the active CLI entry, so you do not need to manually rewrite it as a root command. The CLI preserves the current command arguments as closely as possible and prints a retry hint when a privileged command fails without `--sudo`.
+
+Examples:
+
+```bash
+arbor-ddns apply --workspace ./workspaces/example-zone --sudo
+arbor-ddns plan --workspace ./workspaces/example-zone --sudo
+arbor-ddns discover lxc 101 --sudo
+```
 
 ## Runtime files
 
@@ -126,7 +145,9 @@ runtime/
 
 `runtime/logs/arbor-ddns.log` is the stable operator-facing symlink. The actual file writes go to daily files, and old daily files are pruned by the configured retention window.
 
-The CLI still writes concise summaries to stdout and stderr. The workspace file log is additive and is useful for later inspection from the workspace itself.
+New workspaces default to `arbor_ddns_logging.stream: none`, so logger output goes to the workspace file log by default. Command results and errors still print concise summaries to stdout and stderr.
+
+Existing workspaces keep whatever `arbor_ddns_logging.stream` value is already in `workspace.yaml`. Set it to `none` if you want the same file-only logger behavior there too.
 
 ## Uninstall
 
@@ -134,7 +155,7 @@ The CLI still writes concise summaries to stdout and stderr. The workspace file 
 
 ```bash
 cd ./workspaces/example-zone
-uv run arbor-ddns uninstall
+arbor-ddns uninstall
 ```
 
 Default uninstall removes:
@@ -153,7 +174,7 @@ Default uninstall keeps:
 If you want to remove the entire workspace directory too:
 
 ```bash
-uv run arbor-ddns uninstall --workspace ./workspaces/example-zone --purge
+arbor-ddns uninstall --workspace ./workspaces/example-zone --purge
 ```
 
 ## Workspace commands
@@ -175,9 +196,9 @@ uv run arbor-ddns uninstall --workspace ./workspaces/example-zone --purge
 ## Testing
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run mypy src
+pytest
+ruff check .
+mypy src
 ```
 
 ## Internal Release
@@ -185,12 +206,12 @@ uv run mypy src
 Local wheel and sdist build flow:
 
 ```bash
-.venv/bin/python -m build
-pip install dist/arbor_ddns-1.0.0-py3-none-any.whl
+python -m build
+pip install dist/arbor_ddns-1.0.1-py3-none-any.whl
 arbor-ddns --version
 ```
 
-For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.0 release notes](docs/release-notes/1.0.0.md).
+For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.1 release notes](docs/release-notes/1.0.1.md).
 
 ## Documentation
 
@@ -204,4 +225,4 @@ For the full internal release checklist, see [docs/release.md](docs/release.md) 
 - [systemd Integration](docs/systemd_integration.md)
 - [Development Constraints](docs/development_constraints.md)
 - [Internal Release Workflow](docs/release.md)
-- [Release Notes 1.0.0](docs/release-notes/1.0.0.md)
+- [Release Notes 1.0.1](docs/release-notes/1.0.1.md)

@@ -159,7 +159,7 @@ def test_apply_logging_config_uses_supplied_runtime_config(tmp_path: Path) -> No
     assert "applied from runtime config" in symlink.resolve().read_text(encoding="utf-8")
 
 
-def test_workspace_logging_context_uses_workspace_file_and_restores_previous_handlers(
+def test_workspace_logging_context_uses_workspace_file_without_default_stderr_output(
     tmp_path: Path,
     capsys,
 ) -> None:
@@ -176,6 +176,7 @@ def test_workspace_logging_context_uses_workspace_file_and_restores_previous_han
         logging.getLogger("arbor_ddns.test").warning("restored stderr logging")
 
     captured = capsys.readouterr()
+    assert "workspace logging active" not in captured.err
     assert "restored stderr logging" in captured.err
     symlink = workspace / "runtime" / "logs" / "arbor-ddns.log"
     assert symlink.is_symlink()

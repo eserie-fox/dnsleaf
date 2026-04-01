@@ -37,6 +37,7 @@ def test_workspace_scaffold_defaults_build_typed_model() -> None:
     assert workspace_config.paths.pct_bin == "pct"
     assert workspace_config.paths.systemctl_bin == "systemctl"
     assert workspace_config.arbor_ddns_logging.file_path == "runtime/logs/arbor-ddns.log"
+    assert workspace_config.arbor_ddns_logging.stream == "none"
 
 
 def test_entries_scaffold_defaults_build_typed_model() -> None:
