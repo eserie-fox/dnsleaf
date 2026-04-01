@@ -14,7 +14,10 @@ from arbor_ddns.logging import configure_default_logging
 
 app = typer.Typer(
     add_completion=False,
-    help="Manage workspace-driven Cloudflare DDNS for PVE guests and static IP entries.",
+    help=(
+        "Manage workspace-driven Cloudflare DDNS for PVE guests, "
+        "the local host, and static IP targets."
+    ),
     invoke_without_command=True,
 )
 VERSION_OPTION = typer.Option(

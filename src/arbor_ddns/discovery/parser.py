@@ -1,4 +1,4 @@
-"""Parsers for PVE discovery command outputs."""
+"""Parsers for discovery command outputs."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ _ADDRESS_RECORD_RE = re.compile(r"^\d+:\s+(?P<interface>\S+)(?P<rest>.*)$")
 _NOISE_VALUE_KEYS = {"brd", "metric", "peer", "preferred_lft", "valid_lft"}
 
 
-def parse_lxc_ip_addr_output(output: str, *, source: str = "pve_lxc") -> list[AddressCandidate]:
-    """Parse `ip -o addr show` output from an LXC guest."""
+def parse_ip_addr_output(output: str, *, source: str = "ip_addr") -> list[AddressCandidate]:
+    """Parse Linux `ip -o addr show` output."""
 
     candidates: list[AddressCandidate] = []
     for interface, record in _normalize_lxc_ip_addr_records(output):
@@ -37,6 +37,12 @@ def parse_lxc_ip_addr_output(output: str, *, source: str = "pve_lxc") -> list[Ad
             )
         )
     return candidates
+
+
+def parse_lxc_ip_addr_output(output: str, *, source: str = "pve_lxc") -> list[AddressCandidate]:
+    """Compatibility wrapper for LXC discovery parsing."""
+
+    return parse_ip_addr_output(output, source=source)
 
 
 def parse_qga_interfaces(

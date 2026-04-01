@@ -4,7 +4,7 @@
 
 The current implementation supports:
 
-- dynamic PVE-backed `A`, `AAAA`, and dual-stack entries
+- dynamic `A`, `AAAA`, and dual-stack entries from PVE guests or the local host
 - explicit static IPv4, IPv6, and dual-stack entries
 - Cloudflare-only DNS sync
 
@@ -19,4 +19,5 @@ Documents:
 - [systemd Integration](systemd_integration.md)
 - [Development Constraints](development_constraints.md)
 - [Internal Release Workflow](release.md)
+- [Release Notes 1.0.2](release-notes/1.0.2.md)
 - [Release Notes 1.0.1](release-notes/1.0.1.md)

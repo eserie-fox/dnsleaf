@@ -9,7 +9,7 @@ The runtime flow is:
 More explicitly:
 
 1. `workspace.yaml` and `entries.yaml` are loaded from a workspace directory.
-2. Dynamic entries use discovery backends to gather IPv4 and IPv6 candidates from PVE.
+2. Dynamic entries use discovery backends to gather IPv4 and IPv6 candidates from PVE guests or the local host.
 3. The selector chooses one family-specific address or returns an explicit non-selection result.
 4. Static entries bypass discovery and selection entirely.
 5. Cloudflare current state is queried.
@@ -24,7 +24,7 @@ More explicitly:
   - renders derived artifacts
   - aggregates status and doctor output
 - `arbor_ddns.discovery`
-  - collects IPv4 and IPv6 candidate addresses from PVE
+  - collects IPv4 and IPv6 candidate addresses from dynamic targets
   - contains family-specific selection logic
   - never calls DNS APIs
 - `arbor_ddns.dns`

@@ -101,11 +101,42 @@ def register(app: typer.Typer) -> None:
         except Exception as exc:
             common.exit_with_error(exc, json_output=json_output)
 
+    @discover_app.command("local")
+    def discover_local_command(
+        ctx: typer.Context,
+        family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
+        workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
+        json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
+    ) -> None:
+        """Discover IP candidates for the local host."""
+
+        try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_discover_root_requirements(
+                    TargetKind.LOCAL,
+                    workspace=workspace,
+                ),
+                sudo_requested=sudo,
+            ):
+                return
+            _run_discover(
+                ctx,
+                TargetKind.LOCAL,
+                None,
+                family,
+                workspace=workspace,
+                json_output=json_output,
+            )
+        except Exception as exc:
+            common.exit_with_error(exc, json_output=json_output)
+
 
 def _run_discover(
     ctx: typer.Context,
     kind: TargetKind,
-    target_id: int,
+    target_id: int | None,
     family: EntryAddressFamily,
     *,
     workspace: Path | None,
@@ -139,7 +170,7 @@ def _run_discover(
         typer.echo(
             common.json_payload(
                 {
-                    "target": target.model_dump(mode="json"),
+                    "target": target.model_dump(mode="json", exclude_none=True),
                     "backend": discovery.backend,
                     "error": discovery.error,
                     "candidates": [
@@ -159,7 +190,7 @@ def _run_discover(
             raise typer.Exit(code=1)
         return
 
-    typer.echo(f"target={kind.value}/{target_id} backend={discovery.backend}")
+    typer.echo(f"target={target.descriptor} backend={discovery.backend}")
     if discovery.error is not None:
         typer.echo(f"status=error reason={discovery.error}")
         raise typer.Exit(code=1)

@@ -14,7 +14,7 @@ Each entry contains:
 - `family`
 - `enabled`
 - optional `source_id` for `lxc` and `vm`
-- optional `selection_policy` for `lxc` and `vm`
+- optional `selection_policy` for dynamic entries
 - optional `ttl`
 - optional `proxied`
 - optional `description`
@@ -24,11 +24,13 @@ Each entry contains:
 Validation rules:
 
 - `source_kind=lxc|vm` requires `source_id` and `selection_policy`
+- `source_kind=local` requires `selection_policy` and forbids `source_id`
 - `source_kind=static` forbids `source_id` and `selection_policy`
 - `family=ipv4` manages one `A` record flow
 - `family=ipv6` manages one `AAAA` record flow
 - `family=both` manages two independent record flows
 - static entries must provide matching static values for the chosen family
+- local entries are dynamic entries that discover IPs from the machine running arbor-ddns
 - old `record_type`-based entry files are rejected instead of being auto-converted
 
 ## CLI
@@ -43,6 +45,7 @@ cd ./workspaces/example-zone && arbor-ddns entry list
 ### Add dynamic entries
 
 ```bash
+arbor-ddns entry add local --workspace ./workspaces/example-zone --fqdn self.example.com --name self --family both
 arbor-ddns entry add lxc --workspace ./workspaces/example-zone --id 101 --fqdn host.example.com --name web --family both
 arbor-ddns entry add vm  --workspace ./workspaces/example-zone --id 201 --fqdn vm.example.com   --name guest --family ipv6
 ```

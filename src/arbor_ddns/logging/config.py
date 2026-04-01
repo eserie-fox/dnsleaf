@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -38,6 +39,20 @@ def resolved_log_level(value: str) -> int:
     """Return the stdlib logging level integer for one normalized level name."""
 
     return _LOG_LEVELS[normalize_log_level_name(value)]
+
+
+def absolute_path_without_symlink_resolution(
+    path: str | Path,
+    *,
+    base_dir: str | Path | None = None,
+) -> Path:
+    """Return one absolute path without dereferencing the final symlink target."""
+
+    raw_path = Path(path).expanduser()
+    if not raw_path.is_absolute():
+        base_path = Path.cwd() if base_dir is None else Path(base_dir).expanduser()
+        raw_path = base_path / raw_path
+    return Path(os.path.abspath(raw_path))
 
 
 class ResolvedArborDDNSLoggingConfig(BaseModel):
@@ -101,12 +116,7 @@ class ArborDDNSLoggingConfig(BaseModel):
 
         if self.file_path is None:
             return None
-        raw_path = Path(self.file_path).expanduser()
-        if raw_path.is_absolute():
-            return raw_path.resolve()
-        if base_dir is None:
-            return (Path.cwd() / raw_path).resolve()
-        return (Path(base_dir).expanduser().resolve() / raw_path).resolve()
+        return absolute_path_without_symlink_resolution(self.file_path, base_dir=base_dir)
 
     def resolved_level(self) -> int:
         """Return the stdlib logging level integer."""

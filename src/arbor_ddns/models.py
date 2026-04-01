@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -10,8 +11,9 @@ from arbor_ddns.util.ip import normalize_ip, record_type_for_family
 
 
 class TargetKind(StrEnum):
-    """Supported PVE guest kinds."""
+    """Supported discovery target kinds."""
 
+    LOCAL = "local"
     LXC = "lxc"
     VM = "vm"
 
@@ -19,6 +21,7 @@ class TargetKind(StrEnum):
 class EntrySourceKind(StrEnum):
     """Supported workspace entry source kinds."""
 
+    LOCAL = "local"
     LXC = "lxc"
     VM = "vm"
     STATIC = "static"
@@ -26,6 +29,8 @@ class EntrySourceKind(StrEnum):
     def to_target_kind(self) -> TargetKind:
         """Return the dynamic discovery target kind."""
 
+        if self is EntrySourceKind.LOCAL:
+            return TargetKind.LOCAL
         if self is EntrySourceKind.LXC:
             return TargetKind.LXC
         if self is EntrySourceKind.VM:
@@ -64,12 +69,28 @@ class EntryAddressFamily(StrEnum):
 
 
 class TargetRef(BaseModel):
-    """Identity of a discoverable guest."""
+    """Identity of a discoverable target."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: TargetKind
-    id: int = Field(ge=1)
+    id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> Self:
+        if self.kind in {TargetKind.LXC, TargetKind.VM} and self.id is None:
+            raise ValueError(f"{self.kind.value} targets require id")
+        if self.kind is TargetKind.LOCAL and self.id is not None:
+            raise ValueError("local targets must not define id")
+        return self
+
+    @property
+    def descriptor(self) -> str:
+        """Return a compact target descriptor for CLI and logs."""
+
+        if self.id is None:
+            return self.kind.value
+        return f"{self.kind.value}/{self.id}"
 
 
 class SelectedAddress(BaseModel):

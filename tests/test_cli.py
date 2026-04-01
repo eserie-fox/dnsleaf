@@ -287,6 +287,41 @@ def test_entry_add_lxc_command(monkeypatch) -> None:
     assert "added entry web" in result.stdout
 
 
+def test_entry_add_local_command(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def add_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(operation="add", changed=True, message="added entry self")
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "entry",
+            "add",
+            "local",
+            "--workspace",
+            "/tmp/lab",
+            "--fqdn",
+            "self.example.com",
+            "--name",
+            "self",
+            "--family",
+            "ipv6",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "added entry self" in result.stdout
+    assert captured["source_kind"] == "local"
+    assert "source_id" not in captured
+
+
 def test_entry_add_static_command(monkeypatch) -> None:
     monkeypatch.setattr(common, "entry_service", lambda ctx: FakeEntryService())
     monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
@@ -419,6 +454,29 @@ def test_discover_command_reports_both_families(monkeypatch) -> None:
     assert "candidate family=ipv6" in result.stdout
     assert "family=ipv4 status=selected" in result.stdout
     assert "family=ipv6 status=selected" in result.stdout
+
+
+def test_discover_local_command_reports_target_without_id(monkeypatch) -> None:
+    monkeypatch.setattr(common, "debug_runner", lambda ctx: FakeDebugRunner())
+    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: False)
+
+    result = runner.invoke(cli.app, ["discover", "local", "--family", "both"])
+
+    assert result.exit_code == 0
+    assert "target=local backend=fake" in result.stdout
+    assert "candidate family=ipv4" in result.stdout
+    assert "candidate family=ipv6" in result.stdout
+
+
+def test_discover_local_json_omits_target_id(monkeypatch) -> None:
+    monkeypatch.setattr(common, "debug_runner", lambda ctx: FakeDebugRunner())
+    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: False)
+
+    result = runner.invoke(cli.app, ["discover", "local", "--family", "ipv6", "--json"])
+
+    assert result.exit_code == 0
+    assert '"kind": "local"' in result.stdout
+    assert '"id"' not in result.stdout
 
 
 def test_validate_without_workspace_fails_outside_workspace(monkeypatch, tmp_path: Path) -> None:

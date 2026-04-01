@@ -295,6 +295,13 @@ class WorkspaceEntry(BaseModel):
                 and self.static_ipv6 is None
             ):
                 raise ValueError("static_ipv6 is required for static ipv6/both entries")
+        elif self.source_kind is EntrySourceKind.LOCAL:
+            if self.source_id is not None:
+                raise ValueError("dynamic local entries must not define source_id")
+            if self.selection_policy is None:
+                raise ValueError("dynamic local entries require selection_policy")
+            if self.static_ipv4 is not None or self.static_ipv6 is not None:
+                raise ValueError("dynamic local entries must not define static IP values")
         else:
             if self.source_id is None:
                 raise ValueError("dynamic lxc/vm entries require source_id")
@@ -307,6 +314,8 @@ class WorkspaceEntry(BaseModel):
     def to_target_ref(self) -> TargetRef:
         """Return the discovery target for this entry."""
 
+        if self.source_kind is EntrySourceKind.LOCAL:
+            return TargetRef(kind=self.source_kind.to_target_kind(), id=None)
         if self.source_id is None:
             raise ValueError("static entries do not have a discovery target")
         return TargetRef(kind=self.source_kind.to_target_kind(), id=self.source_id)
@@ -352,6 +361,8 @@ class WorkspaceEntry(BaseModel):
 
         if self.source_kind is EntrySourceKind.STATIC:
             return "static"
+        if self.source_kind is EntrySourceKind.LOCAL:
+            return "local"
         return f"{self.source_kind.value}/{self.source_id}"
 
 

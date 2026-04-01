@@ -26,6 +26,8 @@ class PVEQGADiscoveryBackend(DiscoveryBackend):
     def discover(self, target: TargetRef) -> DiscoveryResult:
         if target.kind is not TargetKind.VM:
             raise ValueError("PVEQGADiscoveryBackend only supports vm targets")
+        if target.id is None:
+            raise ValueError("PVEQGADiscoveryBackend requires a vm target id")
 
         args = [self._qm_bin, "agent", str(target.id), "network-get-interfaces"]
         try:

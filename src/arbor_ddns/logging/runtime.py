@@ -17,6 +17,7 @@ from arbor_ddns.logging.config import (
     DEFAULT_LOG_LEVEL_NAME,
     DEFAULT_RETENTION_DAYS,
     LoggingStream,
+    absolute_path_without_symlink_resolution,
     normalize_log_level_name,
     resolved_log_level,
 )
@@ -42,9 +43,7 @@ class DailySymlinkFileHandler(logging.Handler):
         now_func: Callable[[], datetime] = lambda: datetime.now(tz=UTC),
     ) -> None:
         super().__init__()
-        path = Path(symlink_path).expanduser()
-        if not path.is_absolute():
-            path = (Path.cwd() / path).resolve()
+        path = absolute_path_without_symlink_resolution(symlink_path)
 
         self.symlink_path = path
         self.log_dir = path.parent
@@ -178,7 +177,9 @@ def load_workspace_logging_config(
 
     logging_config = loaded_workspace.resolved_workspace.arbor_ddns_logging
     file_path = (
-        Path(logging_config.file_path).resolve() if logging_config.file_path is not None else None
+        absolute_path_without_symlink_resolution(logging_config.file_path)
+        if logging_config.file_path is not None
+        else None
     )
     return loaded_workspace, ResolvedLoggingConfig(
         level=resolved_log_level(logging_config.level),
