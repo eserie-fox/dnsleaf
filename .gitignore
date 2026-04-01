@@ -220,4 +220,4 @@ __marimo__/
 .agents/
 .codex
 skills-lock.json
-config/
+/config

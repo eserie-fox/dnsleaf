@@ -21,14 +21,15 @@ def register(app: typer.Typer) -> None:
 
     @entry_app.command("list")
     def entry_list_command(
+        ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """List workspace entries."""
 
         try:
-            entries = common.entry_service(config).list_entries(workspace)
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-list"):
+                entries = common.entry_service(ctx).list_entries(workspace)
         except Exception as exc:
             common.exit_with_error(exc, json_output=json_output)
         if json_output:
@@ -43,6 +44,7 @@ def register(app: typer.Typer) -> None:
 
     @entry_app.command("update")
     def entry_update_command(
+        ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
         fqdn: Annotated[str | None, typer.Option("--fqdn")] = None,
@@ -55,73 +57,81 @@ def register(app: typer.Typer) -> None:
         description: Annotated[str | None, typer.Option("--description")] = None,
         static_ipv4: Annotated[str | None, typer.Option("--ipv4")] = None,
         static_ipv6: Annotated[str | None, typer.Option("--ipv6")] = None,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Update a workspace entry."""
 
         try:
-            result = common.entry_service(config).update_entry(
-                workspace,
-                name=name,
-                fqdn=fqdn,
-                family=family.value if family is not None else None,
-                selection_policy=selection_policy,
-                enabled=enabled,
-                ttl=ttl,
-                proxied=proxied,
-                source_id=source_id,
-                description=description,
-                static_ipv4=static_ipv4,
-                static_ipv6=static_ipv6,
-            )
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-update"):
+                result = common.entry_service(ctx).update_entry(
+                    workspace,
+                    name=name,
+                    fqdn=fqdn,
+                    family=family.value if family is not None else None,
+                    selection_policy=selection_policy,
+                    enabled=enabled,
+                    ttl=ttl,
+                    proxied=proxied,
+                    source_id=source_id,
+                    description=description,
+                    static_ipv4=static_ipv4,
+                    static_ipv6=static_ipv6,
+                )
         except Exception as exc:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)
 
     @entry_app.command("remove")
     def entry_remove_command(
+        ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Remove a workspace entry."""
 
         try:
-            result = common.entry_service(config).remove_entry(workspace, name=name)
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-remove"):
+                result = common.entry_service(ctx).remove_entry(workspace, name=name)
         except Exception as exc:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)
 
     @entry_app.command("enable")
     def entry_enable_command(
+        ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Enable a workspace entry."""
 
         try:
-            result = common.entry_service(config).set_enabled(workspace, name=name, enabled=True)
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-enable"):
+                result = common.entry_service(ctx).set_enabled(workspace, name=name, enabled=True)
         except Exception as exc:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)
 
     @entry_app.command("disable")
     def entry_disable_command(
+        ctx: typer.Context,
         name: str,
         workspace: Path = common.WORKSPACE_OPTION,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Disable a workspace entry."""
 
         try:
-            result = common.entry_service(config).set_enabled(workspace, name=name, enabled=False)
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-disable"):
+                result = common.entry_service(ctx).set_enabled(
+                    workspace,
+                    name=name,
+                    enabled=False,
+                )
         except Exception as exc:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)
 
     @entry_add_app.command("lxc")
     def entry_add_lxc(
+        ctx: typer.Context,
         source_id: Annotated[int, typer.Option("--id")],
         fqdn: Annotated[str, typer.Option("--fqdn")],
         name: Annotated[str, typer.Option("--name")],
@@ -131,29 +141,30 @@ def register(app: typer.Typer) -> None:
         ttl: Annotated[int | None, typer.Option("--ttl")] = None,
         proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Add a dynamic LXC entry."""
 
         try:
-            result = common.entry_service(config).add_entry(
-                workspace,
-                name=name,
-                source_kind="lxc",
-                source_id=source_id,
-                fqdn=fqdn,
-                family=family.value,
-                selection_policy=selection_policy,
-                ttl=ttl,
-                proxied=proxied,
-                description=description,
-            )
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-add-lxc"):
+                result = common.entry_service(ctx).add_entry(
+                    workspace,
+                    name=name,
+                    source_kind="lxc",
+                    source_id=source_id,
+                    fqdn=fqdn,
+                    family=family.value,
+                    selection_policy=selection_policy,
+                    ttl=ttl,
+                    proxied=proxied,
+                    description=description,
+                )
         except Exception as exc:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)
 
     @entry_add_app.command("vm")
     def entry_add_vm(
+        ctx: typer.Context,
         source_id: Annotated[int, typer.Option("--id")],
         fqdn: Annotated[str, typer.Option("--fqdn")],
         name: Annotated[str, typer.Option("--name")],
@@ -163,29 +174,30 @@ def register(app: typer.Typer) -> None:
         ttl: Annotated[int | None, typer.Option("--ttl")] = None,
         proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Add a dynamic VM entry."""
 
         try:
-            result = common.entry_service(config).add_entry(
-                workspace,
-                name=name,
-                source_kind="vm",
-                source_id=source_id,
-                fqdn=fqdn,
-                family=family.value,
-                selection_policy=selection_policy,
-                ttl=ttl,
-                proxied=proxied,
-                description=description,
-            )
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-add-vm"):
+                result = common.entry_service(ctx).add_entry(
+                    workspace,
+                    name=name,
+                    source_kind="vm",
+                    source_id=source_id,
+                    fqdn=fqdn,
+                    family=family.value,
+                    selection_policy=selection_policy,
+                    ttl=ttl,
+                    proxied=proxied,
+                    description=description,
+                )
         except Exception as exc:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)
 
     @entry_add_app.command("static")
     def entry_add_static(
+        ctx: typer.Context,
         fqdn: Annotated[str, typer.Option("--fqdn")],
         name: Annotated[str, typer.Option("--name")],
         family: EntryAddressFamily = common.FAMILY_OPTION,
@@ -195,23 +207,23 @@ def register(app: typer.Typer) -> None:
         ttl: Annotated[int | None, typer.Option("--ttl")] = None,
         proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Add a static IP entry."""
 
         try:
-            result = common.entry_service(config).add_entry(
-                workspace,
-                name=name,
-                source_kind="static",
-                fqdn=fqdn,
-                family=family.value,
-                ttl=ttl,
-                proxied=proxied,
-                description=description,
-                static_ipv4=static_ipv4,
-                static_ipv6=static_ipv6,
-            )
+            with common.workspace_command_logging(ctx, workspace, command_name="entry-add-static"):
+                result = common.entry_service(ctx).add_entry(
+                    workspace,
+                    name=name,
+                    source_kind="static",
+                    fqdn=fqdn,
+                    family=family.value,
+                    ttl=ttl,
+                    proxied=proxied,
+                    description=description,
+                    static_ipv4=static_ipv4,
+                    static_ipv6=static_ipv6,
+                )
         except Exception as exc:
             common.exit_with_error(exc)
         common.format_entry_mutation(result)

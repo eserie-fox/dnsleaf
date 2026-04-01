@@ -1,41 +1,41 @@
 from __future__ import annotations
 
-from arbor_ddns.config import AppConfig
-from arbor_ddns.util.json_merge import deep_merge
+from arbor_ddns.config import OutsideWorkspaceConfig, deep_merge
 
 
-def test_from_defaults_loads_packaged_defaults() -> None:
-    config = AppConfig.from_defaults()
+def test_from_defaults_loads_packaged_outside_workspace_config() -> None:
+    config = OutsideWorkspaceConfig.from_defaults()
 
-    assert config.discovery.pct_bin == "pct"
-    assert config.systemd.systemctl_bin == "systemctl"
-    assert config.workspace_scaffold.api_token_file == "secrets/cloudflare_api_token.txt"
-    assert config.workspace_scaffold.systemd.on_unit_active_sec == "10min"
+    assert config.paths.pct_bin == "pct"
+    assert config.paths.qm_bin == "qm"
+    assert config.arbor_ddns_logging.level == "INFO"
+    assert config.arbor_ddns_logging.stream == "stderr"
+    assert config.arbor_ddns_logging.file_path is None
+    assert "config_version" not in config.model_dump()
 
 
 def test_from_file_none_falls_back_to_defaults() -> None:
-    assert AppConfig.from_file(None).model_dump() == AppConfig.from_defaults().model_dump()
+    assert OutsideWorkspaceConfig.from_file(None).model_dump() == (
+        OutsideWorkspaceConfig.from_defaults().model_dump()
+    )
 
 
-def test_from_mapping_deep_merges_runtime_config() -> None:
-    config = AppConfig.from_mapping(
+def test_from_mapping_deep_merges_outside_workspace_config() -> None:
+    config = OutsideWorkspaceConfig.from_mapping(
         {
-            "systemd": {
-                "unit_dir": "/tmp/arbor-ddns-tests",
+            "paths": {
+                "pct_bin": "/usr/sbin/pct",
             },
-            "workspace_scaffold": {
-                "zone_name": "lab.example.com",
-                "systemd": {
-                    "on_unit_active_sec": "30min",
-                },
+            "arbor_ddns_logging": {
+                "level": "debug",
             },
         }
     )
 
-    assert config.systemd.unit_dir == "/tmp/arbor-ddns-tests"
-    assert config.workspace_scaffold.zone_name == "lab.example.com"
-    assert config.workspace_scaffold.systemd.on_unit_active_sec == "30min"
-    assert config.workspace_scaffold.systemd.on_boot_sec == "2min"
+    assert config.paths.pct_bin == "/usr/sbin/pct"
+    assert config.paths.qm_bin == "qm"
+    assert config.arbor_ddns_logging.level == "DEBUG"
+    assert config.arbor_ddns_logging.stream == "stderr"
 
 
 def test_deep_merge_replaces_lists_instead_of_concatenating() -> None:

@@ -17,6 +17,14 @@ Current scope:
 uv sync --python 3.11
 ```
 
+For local release builds and test tooling, sync the development dependencies:
+
+```bash
+uv sync --extra dev --python 3.11
+```
+
+See [Internal Release Workflow](docs/release.md) for local build, install, and verification steps.
+
 ## Quick start
 
 1. Initialize a workspace.
@@ -36,6 +44,8 @@ printf '%s\n' 'YOUR_TOKEN' > ./workspaces/example-zone/secrets/cloudflare_api_to
 - `zone_name`
 - optional `zone_id`
 - `api_token_file` if you want a different token path
+- optional `paths` overrides if this workspace should use non-default `pct`, `qm`, `sh`, `systemctl`, or a non-default systemd unit directory
+- optional `arbor_ddns_logging` overrides if you want a different workspace log path, level, stream, or retention
 
 4. Add entries.
 
@@ -98,6 +108,9 @@ uv run arbor-ddns apply --workspace ./workspaces/example-zone --run-sync
 ```
 
 `apply` writes or updates systemd units under `/etc/systemd/system` by default, so it typically needs root privileges.
+That target path is workspace-owned and can be changed with `workspace.yaml -> paths.systemd_unit_dir`.
+
+Outside a workspace, only low-level `discover` uses the package-shipped outside-workspace config, which provides fallback `pct`, `qm`, `sh`, and stderr logging defaults before any workspace context exists.
 
 ## Runtime files
 
@@ -106,11 +119,14 @@ Each workspace has a `runtime/` subtree for local operator artifacts:
 ```text
 runtime/
   logs/
-    arbor-ddns.log
+    arbor-ddns.log -> arbor-ddns-YYYY-MM-DD.log
+    arbor-ddns-YYYY-MM-DD.log
   run/
 ```
 
-The CLI still writes concise summaries to stdout and stderr. The file log is additive and is useful for later inspection from the workspace itself.
+`runtime/logs/arbor-ddns.log` is the stable operator-facing symlink. The actual file writes go to daily files, and old daily files are pruned by the configured retention window.
+
+The CLI still writes concise summaries to stdout and stderr. The workspace file log is additive and is useful for later inspection from the workspace itself.
 
 ## Uninstall
 
@@ -153,8 +169,8 @@ uv run arbor-ddns uninstall --workspace ./workspaces/example-zone --purge
 - `arbor-ddns provider verify [--workspace <dir>]`
 - `arbor-ddns plan [--workspace <dir>]`
 - `arbor-ddns sync-once [--workspace <dir>] [--apply]`
-- `arbor-ddns discover lxc <id> [--family ipv4|ipv6|both]`
-- `arbor-ddns discover vm <id> [--family ipv4|ipv6|both]`
+- `arbor-ddns discover lxc <id> [--family ipv4|ipv6|both] [--workspace <dir>]`
+- `arbor-ddns discover vm <id> [--family ipv4|ipv6|both] [--workspace <dir>]`
 
 ## Testing
 
@@ -163,6 +179,18 @@ uv run pytest
 uv run ruff check .
 uv run mypy src
 ```
+
+## Internal Release
+
+Local wheel and sdist build flow:
+
+```bash
+.venv/bin/python -m build
+pip install dist/arbor_ddns-1.0.0-py3-none-any.whl
+arbor-ddns --version
+```
+
+For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.0 release notes](docs/release-notes/1.0.0.md).
 
 ## Documentation
 
@@ -175,3 +203,5 @@ uv run mypy src
 - [DNS Sync](docs/dns_sync.md)
 - [systemd Integration](docs/systemd_integration.md)
 - [Development Constraints](docs/development_constraints.md)
+- [Internal Release Workflow](docs/release.md)
+- [Release Notes 1.0.0](docs/release-notes/1.0.0.md)

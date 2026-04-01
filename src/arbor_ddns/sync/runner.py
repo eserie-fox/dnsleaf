@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from arbor_ddns.config import AppConfig
+from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.discovery.base import DiscoveryBackend
 from arbor_ddns.discovery.models import DiscoveryResult, SelectionResult
 from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
@@ -90,12 +90,14 @@ class SyncRunner:
     def __init__(
         self,
         *,
-        app_config: AppConfig,
-        discovery_backends: dict[str, DiscoveryBackend],
+        outside_workspace_config: OutsideWorkspaceConfig | None = None,
+        discovery_backends: dict[str, DiscoveryBackend] | None = None,
         provider_factory: Callable[[LoadedWorkspace], DNSProvider],
     ) -> None:
-        self._app_config = app_config
-        self._discovery_backends = discovery_backends
+        self._outside_workspace_config = (
+            outside_workspace_config or OutsideWorkspaceConfig.from_defaults()
+        )
+        self._discovery_backends = discovery_backends or {}
         self._provider_factory = provider_factory
 
     def discover_target(
@@ -104,10 +106,11 @@ class SyncRunner:
         *,
         family: IPAddressFamily,
         policy: str = "default",
+        loaded_workspace: LoadedWorkspace | None = None,
     ) -> tuple[DiscoveryResult, SelectionResult]:
         """Discover and select an address for one target family."""
 
-        backend = self._backend_for_kind(target.kind)
+        backend = self._backend_for_kind(target.kind, loaded_workspace=loaded_workspace)
         discovery = backend.discover(target)
         if discovery.error is not None:
             selection = SelectionResult(
@@ -130,10 +133,11 @@ class SyncRunner:
         *,
         families: tuple[IPAddressFamily, ...],
         policy: str = "default",
+        loaded_workspace: LoadedWorkspace | None = None,
     ) -> tuple[DiscoveryResult, dict[IPAddressFamily, SelectionResult]]:
         """Discover once and select addresses for multiple families."""
 
-        backend = self._backend_for_kind(target.kind)
+        backend = self._backend_for_kind(target.kind, loaded_workspace=loaded_workspace)
         discovery = backend.discover(target)
         selections: dict[IPAddressFamily, SelectionResult] = {}
         for family in families:
@@ -222,6 +226,7 @@ class SyncRunner:
             target,
             families=entry.concrete_families(),
             policy=entry.selection_policy or "default",
+            loaded_workspace=loaded,
         )
         outcomes: list[RecordSyncOutcome] = []
         for family in entry.concrete_families():
@@ -496,28 +501,43 @@ class SyncRunner:
             update={"status": "applied", "applied": True, "message": "pruned"}
         )
 
-    def _backend_for_kind(self, kind: TargetKind) -> DiscoveryBackend:
-        try:
-            return self._discovery_backends[kind.value]
-        except KeyError as exc:
-            raise KeyError(f"no discovery backend registered for kind {kind.value}") from exc
+    def _backend_for_kind(
+        self,
+        kind: TargetKind,
+        *,
+        loaded_workspace: LoadedWorkspace | None,
+    ) -> DiscoveryBackend:
+        configured = self._discovery_backends.get(kind.value)
+        if configured is not None:
+            return configured
+        if kind is TargetKind.LXC:
+            if loaded_workspace is not None:
+                return PVELXCDiscoveryBackend(
+                    pct_bin=loaded_workspace.resolved_workspace.paths.pct_bin,
+                    shell_bin=loaded_workspace.resolved_workspace.paths.shell_bin,
+                )
+            return PVELXCDiscoveryBackend(
+                pct_bin=self._outside_workspace_config.paths.pct_bin,
+                shell_bin=self._outside_workspace_config.paths.shell_bin,
+            )
+        if kind is TargetKind.VM:
+            if loaded_workspace is not None:
+                return PVEQGADiscoveryBackend(
+                    qm_bin=loaded_workspace.resolved_workspace.paths.qm_bin,
+                )
+            return PVEQGADiscoveryBackend(
+                qm_bin=self._outside_workspace_config.paths.qm_bin,
+            )
+        raise KeyError(f"no discovery backend registered for kind {kind.value}")
 
 
-def build_runner(app_config: AppConfig) -> SyncRunner:
+def build_runner(
+    outside_workspace_config: OutsideWorkspaceConfig | None = None,
+) -> SyncRunner:
     """Build the default workspace runner."""
 
-    discovery_backends: dict[str, DiscoveryBackend] = {
-        TargetKind.LXC.value: PVELXCDiscoveryBackend(
-            pct_bin=app_config.discovery.pct_bin,
-            shell_bin=app_config.discovery.shell_bin,
-        ),
-        TargetKind.VM.value: PVEQGADiscoveryBackend(
-            qm_bin=app_config.discovery.qm_bin,
-        ),
-    }
     return SyncRunner(
-        app_config=app_config,
-        discovery_backends=discovery_backends,
+        outside_workspace_config=outside_workspace_config,
         provider_factory=lambda loaded: _build_provider(loaded),
     )
 

@@ -1,0 +1,34 @@
+{
+  "config_version": 3,
+  "workspace_name": "example-workspace",
+  "provider": "cloudflare",
+  "zone_name": "example.com",
+  "zone_id": null,
+  "api_token_file": "secrets/cloudflare_api_token.txt",
+  "default_ttl": 120,
+  "default_proxied": false,
+  "paths": {
+    "pct_bin": "pct",
+    "qm_bin": "qm",
+    "shell_bin": "sh",
+    "systemctl_bin": "systemctl",
+    "systemd_unit_dir": "/etc/systemd/system"
+  },
+  "systemd": {
+    "service_name": null,
+    "timer_name": null,
+    "on_boot_sec": "2min",
+    "on_unit_active_sec": "10min",
+    "run_sync_after_apply": false
+  },
+  "apply": {
+    "prune_managed_records": false
+  },
+  "arbor_ddns_logging": {
+    "level": "INFO",
+    "format": "%(asctime)s level=%(levelname)s name=%(name)s workspace=%(workspace_name)s command=%(command_name)s %(message)s",
+    "file_path": "runtime/logs/arbor-ddns.log",
+    "retention_days": 7,
+    "stream": "stderr"
+  }
+}

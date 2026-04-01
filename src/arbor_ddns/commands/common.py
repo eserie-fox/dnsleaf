@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import typer
 
-from arbor_ddns.config import AppConfig
+from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.dns.models import ProviderVerification
+from arbor_ddns.logging import workspace_logging_context
 from arbor_ddns.models import EntryAddressFamily
 from arbor_ddns.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
 from arbor_ddns.workspace.entries import EntryService
@@ -25,7 +27,6 @@ from arbor_ddns.workspace.models import (
 )
 from arbor_ddns.workspace.service import ApplyReport, WorkspaceService
 
-CONFIG_OPTION = typer.Option(None, "--config", "-c", help="Optional app runtime JSON override.")
 WORKSPACE_OPTION = typer.Option(
     Path("."),
     "--workspace",
@@ -43,32 +44,57 @@ FAMILY_BOTH_OPTION = typer.Option(
     "--family",
     help="Address family intent: ipv4, ipv6, or both.",
 )
+OUTSIDE_WORKSPACE_CONFIG_CONTEXT_KEY = "outside_workspace_config"
 
 
-def load_config(config_path: Path | None) -> AppConfig:
-    """Load app runtime config."""
+def outside_workspace_config_from_ctx(ctx: typer.Context) -> OutsideWorkspaceConfig:
+    """Return the outside-workspace config from the current Typer context."""
 
-    return AppConfig.from_file(config_path)
+    ctx.ensure_object(dict)
+    config = ctx.obj.get(OUTSIDE_WORKSPACE_CONFIG_CONTEXT_KEY)
+    if not isinstance(config, OutsideWorkspaceConfig):
+        config = OutsideWorkspaceConfig.from_defaults()
+        ctx.obj[OUTSIDE_WORKSPACE_CONFIG_CONTEXT_KEY] = config
+    return config
 
 
-def workspace_service(config_path: Path | None) -> WorkspaceService:
+def workspace_service(ctx: typer.Context) -> WorkspaceService:
     """Build the workspace facade."""
 
-    return WorkspaceService(app_config=load_config(config_path))
+    _ = ctx
+    return WorkspaceService()
 
 
-def entry_service(config_path: Path | None) -> EntryService:
+def entry_service(ctx: typer.Context) -> EntryService:
     """Build the entry facade."""
 
-    from arbor_ddns.workspace.storage import WorkspaceStorage
+    _ = ctx
+    return EntryService()
 
-    return EntryService(storage=WorkspaceStorage(load_config(config_path)))
 
-
-def debug_runner(config_path: Path | None) -> SyncRunner:
+def debug_runner(ctx: typer.Context) -> SyncRunner:
     """Build the low-level debug runner."""
 
-    return build_runner(load_config(config_path))
+    return build_runner(outside_workspace_config=outside_workspace_config_from_ctx(ctx))
+
+
+@contextmanager
+def workspace_command_logging(
+    ctx: typer.Context,
+    workspace: Path,
+    *,
+    command_name: str,
+    loaded_workspace: Any | None = None,
+) -> Iterator[None]:
+    """Apply workspace-scoped logging for one command execution."""
+
+    _ = ctx
+    with workspace_logging_context(
+        workspace.expanduser().resolve(),
+        command_name=command_name,
+        loaded_workspace=loaded_workspace,
+    ):
+        yield
 
 
 def echo_model_or_text(
@@ -151,6 +177,8 @@ def format_status_report(report: WorkspaceStatus) -> None:
         f"runtime_exists={report.runtime_dir_exists} log_exists={report.runtime_log_file_exists}"
     )
     typer.echo(f"log_file={report.runtime_log_file}")
+    if report.runtime_log_symlink_target is not None:
+        typer.echo(f"log_target={report.runtime_log_symlink_target}")
     typer.echo(
         f"managed_active={report.managed_active_count} managed_stale={report.managed_stale_count}"
     )

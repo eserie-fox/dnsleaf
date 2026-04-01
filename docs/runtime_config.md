@@ -1,44 +1,84 @@
 # Runtime Config
 
-`arbor-ddns` has two configuration layers:
+`arbor-ddns` is workspace-centric.
 
-1. app runtime config
-2. workspace source config
+For operators, the execution config lives in `workspace.yaml`. There is no CLI-level `--config` override and no separate operator-facing app config file.
 
-This document describes the app runtime config.
+## What still exists under `arbor_ddns.config`
 
-## App runtime config
+The `arbor_ddns.config` package still contains an internal outside-workspace config layer for:
 
-The app runtime config exists for program defaults such as:
+- package-shipped scaffold resources
+- package-shipped outside-workspace defaults for non-workspace behavior
+- the canonical deep-merge helper
+- package resource loading helpers
 
-- discovery command locations
-- systemd installation defaults
-- workspace scaffold defaults
+This internal layer is not the main day-to-day editing surface.
 
-It is not the main user editing surface for day-to-day management.
+## Outside-workspace config shape
 
-## Formal runtime config pattern
-
-The app runtime config follows this fixed pattern:
+The outside-workspace model is `OutsideWorkspaceConfig` and follows the formal runtime config pattern:
 
 1. read package defaults
-2. read override mapping or JSON file
+2. optionally read an override mapping or JSON file
 3. deep merge
 4. validate with Pydantic v2
 
-Public loaders:
+Python API:
 
-- `AppConfig.from_defaults()`
-- `AppConfig.from_file(path)`
-- `AppConfig.from_mapping(data)`
+- `OutsideWorkspaceConfig.from_defaults()`
+- `OutsideWorkspaceConfig.from_file(path)`
+- `OutsideWorkspaceConfig.from_mapping(data)`
 
-## Package defaults
+These helpers are useful for tests and internal wiring. They are not exposed as normal CLI configuration.
 
-Defaults are shipped inside the package:
+This model does not use `config_version`, because it is not an operator-facing long-lived config contract.
 
-- `src/arbor_ddns/config_defaults/app.json`
+## What the outside-workspace config covers
 
-This keeps install-time behavior deterministic and avoids host-specific assumptions.
+The outside-workspace config is intentionally small:
+
+- fallback discovery command paths for `discover` when it runs outside a workspace
+- simple root stderr logging for commands that do not have a workspace context yet
+- scaffold resource loading
+
+They do not own workspace execution behavior such as:
+
+- Cloudflare zone or token paths
+- workspace logging destinations
+- workspace systemd install locations
+- workspace discovery command choices
+
+Those belong to `workspace.yaml`.
+
+## Shared schema with workspace config
+
+Outside-workspace config and workspace config intentionally share sub-structures where the semantics are the same.
+
+- Logging uses the same `arbor_ddns_logging` schema on both sides.
+- Shared discovery command paths use the same `paths` sub-structure for:
+  - `pct_bin`
+  - `qm_bin`
+  - `shell_bin`
+
+Workspace config extends that with workspace-only fields such as:
+
+- `systemctl_bin`
+- `systemd_unit_dir`
+
+Those workspace-only systemd fields are not present in the outside-workspace config.
+
+## Package resources
+
+Defaults and scaffold resources ship inside the package:
+
+- `src/arbor_ddns/config_defaults/outside_workspace.json`
+- `src/arbor_ddns/config_defaults/scaffold_workspace.json`
+- `src/arbor_ddns/config_defaults/scaffold_entries.json`
+- `src/arbor_ddns/config_defaults/scaffold_layout.json`
+- `src/arbor_ddns/config_defaults/scaffold_secrets_readme.txt`
+
+This keeps scaffold and fallback behavior deterministic and distribution-friendly.
 
 ## Deep merge rules
 
@@ -50,18 +90,13 @@ The merge helper is intentionally simple:
 
 ## Runtime-only resolution
 
-Runtime resolution is not done during raw loading.
+Runtime resolution is explicit and happens after raw validation.
 
 Examples:
 
-- resolving the systemd unit directory path
-- resolving workspace-relative token-file paths
+- resolving `workspace.yaml -> api_token_file`
+- resolving `workspace.yaml -> paths.systemd_unit_dir`
+- resolving `workspace.yaml -> arbor_ddns_logging.file_path`
 - reading the Cloudflare token contents
 
-Those steps happen explicitly at runtime, after the raw config object has already been validated.
-
-## Relationship to workspace config
-
-Workspace config lives in YAML inside the workspace directory and is the normal operator-facing surface.
-
-See [Workspace](workspace.md) for the user-facing config model.
+See [Workspace](workspace.md) for the operator-facing configuration model.

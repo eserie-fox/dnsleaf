@@ -147,7 +147,8 @@ class FakeSystemdManager:
         self.installed_units.append((service_path, timer_path))
         return service_path, timer_path
 
-    def daemon_reload(self, *, check: bool = True) -> CommandResult:
+    def daemon_reload(self, workspace, *, check: bool = True) -> CommandResult:
+        _ = workspace
         self.daemon_reloaded = True
         return CommandResult(
             args=("systemctl", "daemon-reload"),
@@ -156,13 +157,16 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def enable_restart_timer(self, timer_name: str) -> None:
+    def enable_restart_timer(self, workspace, timer_name: str) -> None:
+        _ = workspace
         self.enabled_timers.append(timer_name)
 
-    def start_service(self, service_name: str) -> None:
+    def start_service(self, workspace, service_name: str) -> None:
+        _ = workspace
         self.started_services.append(service_name)
 
-    def stop_service(self, service_name: str, *, check: bool = False) -> CommandResult:
+    def stop_service(self, workspace, service_name: str, *, check: bool = False) -> CommandResult:
+        _ = workspace
         self.stopped_services.append(service_name)
         return CommandResult(
             args=("systemctl", "stop", f"{service_name}.service"),
@@ -171,7 +175,8 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def stop_timer(self, timer_name: str, *, check: bool = False) -> CommandResult:
+    def stop_timer(self, workspace, timer_name: str, *, check: bool = False) -> CommandResult:
+        _ = workspace
         self.stopped_timers.append(timer_name)
         return CommandResult(
             args=("systemctl", "stop", f"{timer_name}.timer"),
@@ -180,7 +185,14 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def disable_timer(self, timer_name: str, *, check: bool = False) -> CommandResult:
+    def disable_timer(
+        self,
+        workspace,
+        timer_name: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        _ = workspace
         self.disabled_timers.append(timer_name)
         return CommandResult(
             args=("systemctl", "disable", f"{timer_name}.timer"),
@@ -189,7 +201,15 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def reset_failed(self, unit_name: str, unit_kind: str, *, check: bool = False) -> CommandResult:
+    def reset_failed(
+        self,
+        workspace,
+        unit_name: str,
+        unit_kind: str,
+        *,
+        check: bool = False,
+    ) -> CommandResult:
+        _ = workspace
         self.reset_failed_units.append((unit_name, unit_kind))
         return CommandResult(
             args=("systemctl", "reset-failed", f"{unit_name}.{unit_kind}"),
@@ -198,17 +218,19 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def installed_unit_path(self, unit_name: str, unit_kind: str) -> Path:
+    def installed_unit_path(self, workspace, unit_name: str, unit_kind: str) -> Path:
+        _ = workspace
         return self.unit_dir / f"{unit_name}.{unit_kind}"
 
-    def remove_installed_unit(self, unit_name: str, unit_kind: str) -> Path | None:
-        path = self.installed_unit_path(unit_name, unit_kind)
+    def remove_installed_unit(self, workspace, unit_name: str, unit_kind: str) -> Path | None:
+        path = self.installed_unit_path(workspace, unit_name, unit_kind)
         if not path.exists():
             return None
         path.unlink()
         return path
 
-    def status(self, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
+    def status(self, workspace, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
+        _ = workspace
         return SystemdUnitStatus(
             unit_name=f"{unit_name}.{unit_kind}",
             available=True,
@@ -219,8 +241,10 @@ class FakeSystemdManager:
             fragment_path=str(self.unit_dir / f"{unit_name}.{unit_kind}"),
         )
 
-    def systemctl_available(self) -> bool:
+    def systemctl_available(self, workspace) -> bool:
+        _ = workspace
         return True
 
-    def unit_dir_writable(self) -> bool:
+    def unit_dir_writable(self, workspace) -> bool:
+        _ = workspace
         return True

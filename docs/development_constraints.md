@@ -16,19 +16,24 @@ This repository intentionally stays narrow and predictable.
 
 ## Configuration constraints
 
-- App runtime config follows the formal runtime config pattern.
-- Package defaults live in `src/arbor_ddns/config_defaults/app.json`.
+- Outside-workspace defaults follow the formal runtime config pattern.
+- Outside-workspace defaults live under the `arbor_ddns.config` package.
+- Package defaults and scaffold resources live in `src/arbor_ddns/config_defaults/`.
 - Loading order is fixed: defaults -> override -> deep merge -> validate.
 - Runtime-only resolution is explicit and separate from raw config loading.
+- Operator-facing execution config belongs in `workspace.yaml`, not in a root CLI config file.
+- Shared semantics should reuse shared sub-models instead of duplicating near-identical config schemas.
 - Secrets are not embedded in source config files.
 - Cloudflare API tokens are read from `api_token_file`.
 - Token contents must never be printed in logs or reports.
+- Workspace logging is configured from `workspace.yaml` via `arbor_ddns_logging`.
 
 ## Execution constraints
 
 - Current execution is serial.
 - Discovery command execution is centralized in `util/process.py`.
 - systemd integration is system-level only in this round.
+- Command entrypoints own workspace logging context; services use normal stdlib loggers.
 - Normal apply does not delete remote DNS records.
 - Prune only targets records previously tracked by the workspace state file.
 - If a tracked record cannot be deleted safely by `record_id`, it is skipped instead of guessed.

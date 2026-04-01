@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from arbor_ddns import cli
 from arbor_ddns.commands import common
+from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult, SelectionResult
 from arbor_ddns.dns.models import ProviderVerification
 from arbor_ddns.models import EntrySourceKind, IPAddressFamily, SelectedAddress, TargetRef
@@ -24,6 +26,10 @@ from arbor_ddns.workspace.models import (
 from arbor_ddns.workspace.service import ApplyReport
 
 runner = CliRunner()
+
+
+def _noop_workspace_logging(*args, **kwargs):
+    return nullcontext()
 
 
 class FakeWorkspaceService:
@@ -190,7 +196,15 @@ class FakeEntryService:
 
 
 class FakeDebugRunner:
-    def discover_target_families(self, target: TargetRef, *, families, policy: str):
+    def discover_target_families(
+        self,
+        target: TargetRef,
+        *,
+        families,
+        policy: str,
+        loaded_workspace=None,
+    ):
+        _ = loaded_workspace
         discovery = DiscoveryResult(
             target=target,
             backend="fake",
@@ -237,7 +251,7 @@ class FakeDebugRunner:
 
 
 def test_init_command(monkeypatch) -> None:
-    monkeypatch.setattr(common, "workspace_service", lambda config_path: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
 
     result = runner.invoke(cli.app, ["init", "/tmp/lab"])
 
@@ -246,7 +260,8 @@ def test_init_command(monkeypatch) -> None:
 
 
 def test_entry_add_lxc_command(monkeypatch) -> None:
-    monkeypatch.setattr(common, "entry_service", lambda config_path: FakeEntryService())
+    monkeypatch.setattr(common, "entry_service", lambda ctx: FakeEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
 
     result = runner.invoke(
         cli.app,
@@ -272,7 +287,8 @@ def test_entry_add_lxc_command(monkeypatch) -> None:
 
 
 def test_entry_add_static_command(monkeypatch) -> None:
-    monkeypatch.setattr(common, "entry_service", lambda config_path: FakeEntryService())
+    monkeypatch.setattr(common, "entry_service", lambda ctx: FakeEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
 
     result = runner.invoke(
         cli.app,
@@ -300,7 +316,8 @@ def test_entry_add_static_command(monkeypatch) -> None:
 
 
 def test_entry_add_defaults_workspace_to_current_directory(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(common, "entry_service", lambda config_path: FakeEntryService())
+    monkeypatch.setattr(common, "entry_service", lambda ctx: FakeEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(
@@ -325,7 +342,8 @@ def test_entry_add_defaults_workspace_to_current_directory(monkeypatch, tmp_path
 
 
 def test_entry_list_shows_static_fields(monkeypatch) -> None:
-    monkeypatch.setattr(common, "entry_service", lambda config_path: FakeEntryService())
+    monkeypatch.setattr(common, "entry_service", lambda ctx: FakeEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
 
     result = runner.invoke(cli.app, ["entry", "list", "--workspace", "/tmp/lab"])
 
@@ -336,7 +354,8 @@ def test_entry_list_shows_static_fields(monkeypatch) -> None:
 
 
 def test_provider_verify_command(monkeypatch) -> None:
-    monkeypatch.setattr(common, "workspace_service", lambda config_path: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
 
     result = runner.invoke(cli.app, ["provider", "verify", "--workspace", "/tmp/lab"])
 
@@ -345,7 +364,8 @@ def test_provider_verify_command(monkeypatch) -> None:
 
 
 def test_validate_defaults_workspace_to_current_directory(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(common, "workspace_service", lambda config_path: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(cli.app, ["validate"])
@@ -355,7 +375,7 @@ def test_validate_defaults_workspace_to_current_directory(monkeypatch, tmp_path:
 
 
 def test_status_reports_runtime_log_fields(monkeypatch) -> None:
-    monkeypatch.setattr(common, "workspace_service", lambda config_path: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
 
     result = runner.invoke(cli.app, ["status", "--workspace", "/tmp/lab"])
 
@@ -365,7 +385,8 @@ def test_status_reports_runtime_log_fields(monkeypatch) -> None:
 
 
 def test_uninstall_command(monkeypatch) -> None:
-    monkeypatch.setattr(common, "workspace_service", lambda config_path: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
 
     result = runner.invoke(cli.app, ["uninstall", "--workspace", "/tmp/lab"])
 
@@ -376,7 +397,8 @@ def test_uninstall_command(monkeypatch) -> None:
 
 
 def test_plan_command_uses_record_outcomes(monkeypatch) -> None:
-    monkeypatch.setattr(common, "workspace_service", lambda config_path: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
 
     result = runner.invoke(cli.app, ["plan", "--workspace", "/tmp/lab"])
 
@@ -386,7 +408,7 @@ def test_plan_command_uses_record_outcomes(monkeypatch) -> None:
 
 
 def test_discover_command_reports_both_families(monkeypatch) -> None:
-    monkeypatch.setattr(common, "debug_runner", lambda config_path: FakeDebugRunner())
+    monkeypatch.setattr(common, "debug_runner", lambda ctx: FakeDebugRunner())
 
     result = runner.invoke(cli.app, ["discover", "lxc", "101", "--family", "both"])
 
@@ -403,4 +425,47 @@ def test_validate_without_workspace_fails_outside_workspace(monkeypatch, tmp_pat
     result = runner.invoke(cli.app, ["validate"])
 
     assert result.exit_code == 1
-    assert "error=" in result.stderr
+    assert result.output == f"error=workspace file not found: {tmp_path / 'workspace.yaml'}\n"
+
+
+def test_root_help_does_not_expose_config_option() -> None:
+    result = runner.invoke(cli.app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "--config" not in result.stdout
+
+
+def test_root_callback_uses_outside_workspace_config_and_configures_default_logging(
+    monkeypatch,
+) -> None:
+    calls: dict[str, object] = {}
+    real_from_defaults = OutsideWorkspaceConfig.from_defaults
+
+    def fake_from_defaults() -> OutsideWorkspaceConfig:
+        calls["defaults_loaded"] = True
+        return real_from_defaults()
+
+    def fake_configure_default_logging(*, stream_name, level, fmt) -> None:
+        calls["stream_name"] = stream_name
+        calls["level"] = level
+        calls["format"] = fmt
+
+    monkeypatch.setattr(
+        cli.OutsideWorkspaceConfig,
+        "from_defaults",
+        staticmethod(fake_from_defaults),
+    )
+    monkeypatch.setattr(cli, "configure_default_logging", fake_configure_default_logging)
+    monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
+
+    result = runner.invoke(
+        cli.app,
+        ["status", "--workspace", "/tmp/lab"],
+    )
+
+    assert result.exit_code == 0
+    assert calls["defaults_loaded"] is True
+    assert calls["stream_name"] == "stderr"
+    assert calls["level"] == (
+        OutsideWorkspaceConfig.from_defaults().arbor_ddns_logging.resolved_level()
+    )

@@ -1,6 +1,6 @@
 # Documentation Index
 
-`arbor-ddns` manages one workspace per DNS zone. The workspace is the user-facing source of truth, and the CLI follows the `init -> validate -> render -> apply -> status` workflow, with `uninstall` for local cleanup and `runtime/logs/arbor-ddns.log` for workspace-local logs.
+`arbor-ddns` manages one workspace per DNS zone. The workspace is the user-facing source of truth, and the CLI follows the `init -> validate -> render -> apply -> status` workflow, with `uninstall` for local cleanup and a stable `runtime/logs/arbor-ddns.log` symlink for workspace-local logs.
 
 The current implementation supports:
 
@@ -18,3 +18,5 @@ Documents:
 - [DNS Sync](dns_sync.md)
 - [systemd Integration](systemd_integration.md)
 - [Development Constraints](development_constraints.md)
+- [Internal Release Workflow](release.md)
+- [Release Notes 1.0.0](release-notes/1.0.0.md)

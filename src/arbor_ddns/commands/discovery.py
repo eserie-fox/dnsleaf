@@ -8,6 +8,17 @@ import typer
 
 from arbor_ddns.commands import common
 from arbor_ddns.models import EntryAddressFamily, TargetKind, TargetRef
+from arbor_ddns.workspace.storage import LoadedWorkspace, WorkspaceStorage
+
+DISCOVER_WORKSPACE_OPTION = typer.Option(
+    None,
+    "--workspace",
+    "-w",
+    help=(
+        "Optional workspace directory. Defaults to the current directory "
+        "when it is a valid workspace."
+    ),
+)
 
 
 def register(app: typer.Typer) -> None:
@@ -18,48 +29,81 @@ def register(app: typer.Typer) -> None:
 
     @discover_app.command("lxc")
     def discover_lxc_command(
+        ctx: typer.Context,
         target_id: int,
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
+        workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Discover IP candidates for an LXC guest."""
 
-        _run_discover(
-            TargetKind.LXC,
-            target_id,
-            family,
-            json_output=json_output,
-            config_path=config,
-        )
+        try:
+            _run_discover(
+                ctx,
+                TargetKind.LXC,
+                target_id,
+                family,
+                workspace=workspace,
+                json_output=json_output,
+            )
+        except Exception as exc:
+            common.exit_with_error(exc, json_output=json_output)
 
     @discover_app.command("vm")
     def discover_vm_command(
+        ctx: typer.Context,
         target_id: int,
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
+        workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
-        config: Path | None = common.CONFIG_OPTION,
     ) -> None:
         """Discover IP candidates for a VM guest."""
 
-        _run_discover(TargetKind.VM, target_id, family, json_output=json_output, config_path=config)
+        try:
+            _run_discover(
+                ctx,
+                TargetKind.VM,
+                target_id,
+                family,
+                workspace=workspace,
+                json_output=json_output,
+            )
+        except Exception as exc:
+            common.exit_with_error(exc, json_output=json_output)
 
 
 def _run_discover(
+    ctx: typer.Context,
     kind: TargetKind,
     target_id: int,
     family: EntryAddressFamily,
     *,
+    workspace: Path | None,
     json_output: bool,
-    config_path: Path | None,
 ) -> None:
     target = TargetRef(kind=kind, id=target_id)
-    runner = common.debug_runner(config_path)
-    discovery, selections = runner.discover_target_families(
-        target,
-        families=family.concrete_families(),
-        policy="default",
-    )
+    loaded_workspace = _resolve_workspace_for_discovery(workspace)
+    runner = common.debug_runner(ctx)
+
+    if loaded_workspace is None:
+        discovery, selections = runner.discover_target_families(
+            target,
+            families=family.concrete_families(),
+            policy="default",
+        )
+    else:
+        with common.workspace_command_logging(
+            ctx,
+            loaded_workspace.paths.root,
+            command_name=f"discover-{kind.value}",
+            loaded_workspace=loaded_workspace,
+        ):
+            discovery, selections = runner.discover_target_families(
+                target,
+                families=family.concrete_families(),
+                policy="default",
+                loaded_workspace=loaded_workspace,
+            )
 
     if json_output:
         typer.echo(
@@ -123,3 +167,14 @@ def _run_discover(
             exit_code = 1
     if exit_code:
         raise typer.Exit(code=exit_code)
+
+
+def _resolve_workspace_for_discovery(workspace: Path | None) -> LoadedWorkspace | None:
+    storage = WorkspaceStorage()
+    if workspace is not None:
+        return storage.load(workspace)
+
+    try:
+        return storage.load(Path("."))
+    except Exception:
+        return None

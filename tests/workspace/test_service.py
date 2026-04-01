@@ -4,9 +4,9 @@ from pathlib import Path
 
 from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider, FakeSystemdManager
 
-from arbor_ddns.config import AppConfig
 from arbor_ddns.discovery.models import AddressCandidate
 from arbor_ddns.dns.models import DNSRecord
+from arbor_ddns.logging import workspace_logging_context
 from arbor_ddns.models import IPAddressFamily, TargetKind
 from arbor_ddns.sync.runner import SyncRunner
 from arbor_ddns.workspace.entries import EntryService
@@ -21,12 +21,10 @@ def _service(
     *,
     discovery_backend: FakeDiscoveryBackend | None = None,
 ) -> WorkspaceService:
-    app_config = AppConfig.from_mapping({"systemd": {"unit_dir": str(tmp_path / "units")}})
-    storage = WorkspaceStorage(app_config)
+    storage = WorkspaceStorage()
     systemd_manager = FakeSystemdManager(tmp_path / "units")
     backend = discovery_backend or FakeDiscoveryBackend()
     runner = SyncRunner(
-        app_config=app_config,
         discovery_backends={
             TargetKind.LXC.value: backend,
             TargetKind.VM.value: backend,
@@ -34,7 +32,6 @@ def _service(
         provider_factory=lambda loaded: provider,
     )
     return WorkspaceService(
-        app_config=app_config,
         storage=storage,
         systemd_manager=systemd_manager,
         renderer=None,
@@ -48,12 +45,10 @@ def _service_with_manager(
     *,
     discovery_backend: FakeDiscoveryBackend | None = None,
 ) -> tuple[WorkspaceService, FakeSystemdManager]:
-    app_config = AppConfig.from_mapping({"systemd": {"unit_dir": str(tmp_path / "units")}})
-    storage = WorkspaceStorage(app_config)
+    storage = WorkspaceStorage()
     systemd_manager = FakeSystemdManager(tmp_path / "units")
     backend = discovery_backend or FakeDiscoveryBackend()
     runner = SyncRunner(
-        app_config=app_config,
         discovery_backends={
             TargetKind.LXC.value: backend,
             TargetKind.VM.value: backend,
@@ -61,7 +56,6 @@ def _service_with_manager(
         provider_factory=lambda loaded: provider,
     )
     service = WorkspaceService(
-        app_config=app_config,
         storage=storage,
         systemd_manager=systemd_manager,
         renderer=None,
@@ -91,7 +85,7 @@ def test_sync_once_updates_managed_record_state_and_prunes_safely(tmp_path: Path
 
     workspace_dir = scaffold_workspace(tmp_path)
     entries = EntryService(
-        WorkspaceStorage(AppConfig.from_mapping({"systemd": {"unit_dir": str(tmp_path / "units")}}))
+        WorkspaceStorage()
     )
     entries.add_entry(
         workspace_dir,
@@ -166,11 +160,15 @@ def test_plan_creates_runtime_log_without_secret_contents(tmp_path: Path) -> Non
     )
     service = _service(tmp_path, FakeDNSProvider())
 
-    service.plan_workspace(workspace_dir)
+    with workspace_logging_context(
+        workspace_dir,
+        command_name="plan",
+    ):
+        service.plan_workspace(workspace_dir)
 
     log_file = workspace_dir / "runtime" / "logs" / "arbor-ddns.log"
-    log_content = log_file.read_text(encoding="utf-8")
-    assert log_file.exists()
+    log_content = log_file.resolve().read_text(encoding="utf-8")
+    assert log_file.is_symlink()
     assert "command=plan" in log_content
     assert "entry=web" in log_content
     assert "secret-token" not in log_content

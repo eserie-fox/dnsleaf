@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 
+from arbor_ddns.workspace.models import EntriesFile, WorkspaceConfig
 from arbor_ddns.workspace.service import WorkspaceService
-from arbor_ddns.workspace.storage import WorkspaceInitError
+from arbor_ddns.workspace.storage import WorkspaceInitError, WorkspaceStorage
 
 
 def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
@@ -22,6 +24,26 @@ def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
     assert (workspace / "runtime" / "logs").is_dir()
     assert (workspace / "runtime" / "run").is_dir()
     assert (workspace / "state" / "managed-records.json").exists()
+
+    workspace_payload = yaml.safe_load((workspace / "workspace.yaml").read_text(encoding="utf-8"))
+    assert workspace_payload["config_version"] == 3
+    assert workspace_payload["paths"]["systemctl_bin"] == "systemctl"
+
+
+def test_workspace_scaffold_defaults_build_typed_model() -> None:
+    workspace_config = WorkspaceConfig.scaffold_defaults("lab")
+
+    assert workspace_config.workspace_name == "lab"
+    assert workspace_config.paths.pct_bin == "pct"
+    assert workspace_config.paths.systemctl_bin == "systemctl"
+    assert workspace_config.arbor_ddns_logging.file_path == "runtime/logs/arbor-ddns.log"
+
+
+def test_entries_scaffold_defaults_build_typed_model() -> None:
+    entries = EntriesFile.scaffold_defaults()
+
+    assert entries.config_version == 2
+    assert entries.entries == []
 
 
 def test_init_allows_existing_empty_directory(tmp_path: Path) -> None:
@@ -47,6 +69,33 @@ def test_validate_resolves_relative_token_file(workspace_dir: Path) -> None:
 
     assert report.workspace_name == "lab"
     assert report.token_file.endswith("secrets/cloudflare_api_token.txt")
+
+
+def test_validate_rejects_old_workspace_schema_version(workspace_dir: Path) -> None:
+    payload = yaml.safe_load((workspace_dir / "workspace.yaml").read_text(encoding="utf-8"))
+    payload["config_version"] = 2
+    (workspace_dir / "workspace.yaml").write_text(
+        yaml.safe_dump(payload, sort_keys=False, allow_unicode=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="config_version must be exactly 3"):
+        WorkspaceService().validate_workspace(workspace_dir)
+
+
+def test_validate_resolves_relative_systemd_unit_dir(workspace_dir: Path) -> None:
+    payload = yaml.safe_load((workspace_dir / "workspace.yaml").read_text(encoding="utf-8"))
+    payload["paths"]["systemd_unit_dir"] = "local/systemd"
+    (workspace_dir / "workspace.yaml").write_text(
+        yaml.safe_dump(payload, sort_keys=False, allow_unicode=False),
+        encoding="utf-8",
+    )
+
+    loaded = WorkspaceStorage().validate(workspace_dir)
+
+    assert loaded.resolved_workspace.paths.resolved_systemd_unit_dir() == (
+        workspace_dir / "local" / "systemd"
+    ).resolve()
 
 
 def test_validate_rejects_old_record_type_entry_schema(workspace_dir: Path) -> None:

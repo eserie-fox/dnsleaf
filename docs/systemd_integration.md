@@ -32,10 +32,10 @@ arbor-ddns sync-once --workspace <abs-workspace> --apply
 
 1. validate workspace
 2. render artifacts
-3. install service and timer into the configured systemd unit directory
-4. `systemctl daemon-reload`
-5. `systemctl enable <timer>`
-6. `systemctl restart <timer>`
+3. install service and timer into `workspace.yaml -> paths.systemd_unit_dir`
+4. run `workspace.yaml -> paths.systemctl_bin daemon-reload`
+5. run `workspace.yaml -> paths.systemctl_bin enable <timer>`
+6. run `workspace.yaml -> paths.systemctl_bin restart <timer>`
 7. write `state/last-apply.json`
 8. optionally run one immediate sync
 
@@ -49,6 +49,11 @@ By default:
 - timer: `arbor-ddns-<workspace-name>.timer`
 
 Explicit names can be set in `workspace.yaml` if required.
+
+The unit directory and `systemctl` command are also workspace-owned:
+
+- `paths.systemctl_bin`
+- `paths.systemd_unit_dir`
 
 ## Status behavior
 
@@ -67,8 +72,10 @@ If `systemctl` is unavailable, status degrades gracefully instead of crashing.
 Workspace-local logs live under:
 
 ```text
-runtime/logs/arbor-ddns.log
+runtime/logs/arbor-ddns.log -> runtime/logs/arbor-ddns-YYYY-MM-DD.log
 ```
+
+The stable symlink points to the current daily file, and older daily files are pruned by the configured retention window.
 
 This file log is additive to normal stdout and stderr output. When the workspace timer runs under systemd, journal output still works as usual.
 

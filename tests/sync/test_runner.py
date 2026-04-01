@@ -4,8 +4,10 @@ from pathlib import Path
 
 from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider
 
-from arbor_ddns.config import AppConfig
+from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.discovery.models import AddressCandidate
+from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
+from arbor_ddns.discovery.pve_qga import PVEQGADiscoveryBackend
 from arbor_ddns.dns.models import DNSRecord
 from arbor_ddns.models import IPAddressFamily, TargetKind
 from arbor_ddns.sync.runner import SyncRunner
@@ -13,35 +15,24 @@ from arbor_ddns.workspace.models import ManagedRecordFile
 from arbor_ddns.workspace.storage import WorkspaceStorage
 
 
-def _app_config(tmp_path: Path) -> AppConfig:
-    return AppConfig.from_mapping(
-        {
-            "systemd": {
-                "unit_dir": str(tmp_path / "units"),
-            }
-        }
-    )
-
-
 def _prepare_loaded_workspace(tmp_path: Path, entries_yaml: str):
     from tests.conftest import scaffold_workspace
 
     workspace_dir = scaffold_workspace(tmp_path)
-    storage = WorkspaceStorage(_app_config(tmp_path))
+    storage = WorkspaceStorage()
     (workspace_dir / "entries.yaml").write_text(entries_yaml, encoding="utf-8")
     return storage.validate(workspace_dir), storage
 
 
 def _build_runner(
-    tmp_path: Path,
     provider: FakeDNSProvider,
     *,
     discovery_backend: FakeDiscoveryBackend | None = None,
+    outside_workspace_config: OutsideWorkspaceConfig | None = None,
 ) -> SyncRunner:
-    app_config = _app_config(tmp_path)
     backend = discovery_backend or FakeDiscoveryBackend()
     return SyncRunner(
-        app_config=app_config,
+        outside_workspace_config=outside_workspace_config,
         discovery_backends={
             TargetKind.LXC.value: backend,
             TargetKind.VM.value: backend,
@@ -66,7 +57,7 @@ def test_runner_dry_run_does_not_apply_changes(tmp_path: Path) -> None:
         ),
     )
     provider = FakeDNSProvider()
-    runner = _build_runner(tmp_path, provider)
+    runner = _build_runner(provider)
 
     report = runner.run(
         loaded,
@@ -97,7 +88,7 @@ def test_runner_apply_calls_provider_for_static_both_entry(tmp_path: Path) -> No
         ),
     )
     provider = FakeDNSProvider()
-    runner = _build_runner(tmp_path, provider)
+    runner = _build_runner(provider)
 
     report = runner.run(
         loaded,
@@ -153,7 +144,7 @@ def test_runner_handles_dynamic_both_with_one_family_ambiguous(tmp_path: Path) -
         ]
     )
     provider = FakeDNSProvider()
-    runner = _build_runner(tmp_path, provider, discovery_backend=discovery_backend)
+    runner = _build_runner(provider, discovery_backend=discovery_backend)
 
     report = runner.run(
         loaded,
@@ -194,7 +185,7 @@ def test_runner_plans_prune_for_tracked_stale_record(tmp_path: Path) -> None:
         record_id="rec-stale",
     )
     provider = FakeDNSProvider(initial_records=[stale_record])
-    runner = _build_runner(tmp_path, provider)
+    runner = _build_runner(provider)
     managed_state = ManagedRecordFile.model_validate(
         {
             "records": [
@@ -220,3 +211,34 @@ def test_runner_plans_prune_for_tracked_stale_record(tmp_path: Path) -> None:
     assert len(report.prune_outcomes) == 1
     assert report.prune_outcomes[0].plan is not None
     assert [change.action for change in report.prune_outcomes[0].plan.changes] == ["delete"]
+
+
+def test_runner_uses_outside_workspace_paths_for_discovery_fallback() -> None:
+    runner = SyncRunner(
+        outside_workspace_config=OutsideWorkspaceConfig.from_mapping(
+            {
+                "paths": {
+                    "pct_bin": "/usr/sbin/pct",
+                    "qm_bin": "/usr/sbin/qm",
+                    "shell_bin": "/bin/bash",
+                },
+                "arbor_ddns_logging": {
+                    "level": "INFO",
+                    "format": "%(message)s",
+                    "file_path": None,
+                    "retention_days": 7,
+                    "stream": "stderr",
+                },
+            }
+        ),
+        provider_factory=lambda loaded: FakeDNSProvider(),
+    )
+
+    lxc_backend = runner._backend_for_kind(TargetKind.LXC, loaded_workspace=None)
+    vm_backend = runner._backend_for_kind(TargetKind.VM, loaded_workspace=None)
+
+    assert isinstance(lxc_backend, PVELXCDiscoveryBackend)
+    assert lxc_backend._pct_bin == "/usr/sbin/pct"
+    assert lxc_backend._shell_bin == "/bin/bash"
+    assert isinstance(vm_backend, PVEQGADiscoveryBackend)
+    assert vm_backend._qm_bin == "/usr/sbin/qm"

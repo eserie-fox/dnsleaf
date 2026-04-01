@@ -12,9 +12,9 @@ More explicitly:
 2. Dynamic entries use discovery backends to gather IPv4 and IPv6 candidates from PVE.
 3. The selector chooses one family-specific address or returns an explicit non-selection result.
 4. Static entries bypass discovery and selection entirely.
-4. Cloudflare current state is queried.
-5. The planner decides `create`, `update`, `delete`, or `noop`.
-6. Optional apply mutates Cloudflare state and updates workspace state files.
+5. Cloudflare current state is queried.
+6. The planner decides `create`, `update`, `delete`, or `noop`.
+7. Optional apply mutates Cloudflare state and updates workspace state files.
 
 ## Module boundaries
 
@@ -37,8 +37,15 @@ More explicitly:
   - renders unit files
   - installs, uninstalls, and queries systemd units
 - `arbor_ddns.config`
-  - app-level runtime defaults
-  - not the main user editing surface
+  - outside-workspace defaults
+  - package-resource scaffold defaults and loaders
+  - canonical deep-merge behavior for outside-workspace/scaffold mappings
+  - not an operator-facing config surface
+- `arbor_ddns.logging`
+  - configures simple root logging for non-workspace commands
+  - applies workspace-scoped logging contexts at command boundaries
+  - keeps a stable symlink plus daily log files for workspace logs
+  - resolves from `workspace.yaml` when a workspace is active
 
 ## Workspace as the source of truth
 
@@ -51,6 +58,15 @@ The primary editing surface is the workspace directory:
 - `state/`: apply and managed-record tracking
 
 The older inventory-style model is no longer part of the workspace workflow.
+
+Execution ownership is also workspace-centric:
+
+- discovery command paths come from `workspace.yaml -> paths`
+- systemd command and unit-directory paths come from `workspace.yaml -> paths`
+- workspace logging comes from `workspace.yaml -> arbor_ddns_logging`
+
+The only notable non-workspace exception is low-level `discover`, which can use internal fallback defaults when run outside a workspace.
+Those fallback values come from the outside-workspace config, not from a second operator-facing runtime config.
 
 ## Cloudflare-only scope
 

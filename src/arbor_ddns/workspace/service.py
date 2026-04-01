@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from datetime import UTC, datetime
-from logging import Logger, LoggerAdapter
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from arbor_ddns.config import AppConfig
 from arbor_ddns.dns.cloudflare import CloudflareDNSProvider
 from arbor_ddns.dns.models import ProviderVerification
 from arbor_ddns.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
@@ -24,12 +23,12 @@ from arbor_ddns.workspace.models import (
     ManagedRecordFile,
     ManagedRecordSnapshot,
     RenderArtifacts,
+    SystemdUnitStatus,
     UninstallReport,
     ValidationReport,
     WorkspaceStatus,
 )
 from arbor_ddns.workspace.renderer import WorkspaceRenderer
-from arbor_ddns.workspace.runtime_logging import close_workspace_logger, workspace_command_logger
 from arbor_ddns.workspace.state import (
     load_last_apply,
     load_managed_records,
@@ -38,6 +37,8 @@ from arbor_ddns.workspace.state import (
     write_managed_records,
 )
 from arbor_ddns.workspace.storage import LoadedWorkspace, WorkspaceStorage
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ApplyReport(BaseModel):
@@ -64,27 +65,28 @@ class WorkspaceService:
     def __init__(
         self,
         *,
-        app_config: AppConfig | None = None,
         storage: WorkspaceStorage | None = None,
         renderer: WorkspaceRenderer | None = None,
         systemd_manager: SystemdManager | None = None,
         runner: SyncRunner | None = None,
     ) -> None:
-        self._app_config = app_config or AppConfig.from_defaults()
-        self._storage = storage or WorkspaceStorage(self._app_config)
-        self._systemd_manager = systemd_manager or SystemdManager(self._app_config)
+        self._storage = storage or WorkspaceStorage()
+        self._systemd_manager = systemd_manager or SystemdManager()
         self._renderer = renderer or WorkspaceRenderer(self._systemd_manager)
-        self._runner = runner or build_runner(self._app_config)
+        self._runner = runner or build_runner()
 
     def init_workspace(self, workspace_dir: str | Path) -> Path:
         """Create a new workspace directory."""
 
-        return self._storage.scaffold(workspace_dir).root
+        created = self._storage.scaffold(workspace_dir).root
+        LOGGER.info("workspace_initialized workspace_root=%s", created)
+        return created
 
     def validate_workspace(self, workspace_dir: str | Path) -> ValidationReport:
         """Validate workspace source config and runtime-only references."""
 
-        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="validate")
+        loaded = self._storage.validate(workspace_dir)
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         report = ValidationReport(
             workspace_root=str(loaded.paths.root),
             workspace_name=loaded.resolved_workspace.workspace_name,
@@ -95,7 +97,7 @@ class WorkspaceService:
             entry_count=len(loaded.entries_file.entries),
             enabled_entry_count=len(loaded.entries_file.enabled_entries()),
         )
-        logger.info(
+        LOGGER.info(
             "validated zone=%s entries=%d enabled=%d",
             report.zone_name,
             report.entry_count,
@@ -106,9 +108,10 @@ class WorkspaceService:
     def render_workspace(self, workspace_dir: str | Path) -> RenderArtifacts:
         """Render workspace artifacts."""
 
-        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="render")
+        loaded = self._storage.validate(workspace_dir)
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         report = self._renderer.render(loaded)
-        logger.info(
+        LOGGER.info(
             "rendered effective_workspace=%s desired_records=%s service_unit=%s timer_unit=%s",
             report.effective_workspace_file,
             report.desired_records_file,
@@ -125,7 +128,8 @@ class WorkspaceService:
     ) -> WorkspaceRunReport:
         """Run a live dry-run plan for a workspace."""
 
-        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="plan")
+        loaded = self._storage.validate(workspace_dir)
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         managed_state = load_managed_records(loaded.paths)
         try:
             report = self._runner.run(
@@ -135,9 +139,9 @@ class WorkspaceService:
                 prune_managed=self._resolve_prune_managed(loaded, prune_managed),
             )
         except Exception:
-            logger.exception("plan failed")
+            LOGGER.exception("plan failed")
             raise
-        self._log_run_report(logger, report)
+        self._log_run_report(report)
         return report
 
     def sync_once(
@@ -149,8 +153,8 @@ class WorkspaceService:
     ) -> WorkspaceRunReport:
         """Run one sync cycle for a workspace."""
 
-        command_name = "sync-once-apply" if apply else "sync-once"
-        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name=command_name)
+        loaded = self._storage.validate(workspace_dir)
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         managed_state = load_managed_records(loaded.paths)
         try:
             report = self._runner.run(
@@ -160,13 +164,13 @@ class WorkspaceService:
                 prune_managed=self._resolve_prune_managed(loaded, prune_managed),
             )
         except Exception:
-            logger.exception("sync run failed")
+            LOGGER.exception("sync run failed")
             raise
         if apply:
             updated_state = self._reconcile_managed_state(loaded, managed_state, report)
             write_managed_records(loaded.paths, updated_state)
-            logger.info("managed_state_updated records=%d", len(updated_state.records))
-        self._log_run_report(logger, report)
+            LOGGER.info("managed_state_updated records=%d", len(updated_state.records))
+        self._log_run_report(report)
         return report
 
     def apply_workspace(
@@ -178,15 +182,19 @@ class WorkspaceService:
     ) -> ApplyReport:
         """Validate, render, install/update systemd units, and optionally sync once."""
 
-        loaded, logger = self._load_workspace_with_logger(workspace_dir, command_name="apply")
+        loaded = self._storage.validate(workspace_dir)
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         render_report = self._renderer.render(loaded)
         installed_service, installed_timer = self._systemd_manager.install_rendered_units(
             loaded.paths,
             loaded.resolved_workspace,
         )
-        self._systemd_manager.daemon_reload()
-        self._systemd_manager.enable_restart_timer(loaded.resolved_workspace.systemd.timer_name)
-        logger.info(
+        self._systemd_manager.daemon_reload(loaded.resolved_workspace)
+        self._systemd_manager.enable_restart_timer(
+            loaded.resolved_workspace,
+            loaded.resolved_workspace.systemd.timer_name,
+        )
+        LOGGER.info(
             "systemd_installed service=%s timer=%s service_unit=%s timer_unit=%s",
             loaded.resolved_workspace.systemd.service_name,
             loaded.resolved_workspace.systemd.timer_name,
@@ -214,7 +222,7 @@ class WorkspaceService:
                 workspace_name=loaded.resolved_workspace.workspace_name,
                 service_name=loaded.resolved_workspace.systemd.service_name,
                 timer_name=loaded.resolved_workspace.systemd.timer_name,
-                unit_dir=str(self._app_config.systemd.resolved_unit_dir()),
+                unit_dir=str(loaded.resolved_workspace.paths.resolved_systemd_unit_dir()),
                 prune_managed=self._resolve_prune_managed(loaded, prune_managed),
                 immediate_sync_requested=immediate_sync_requested,
                 immediate_sync_ran=sync_report is not None,
@@ -234,7 +242,7 @@ class WorkspaceService:
             render=render_report,
             sync_report=sync_report,
         )
-        logger.info(
+        LOGGER.info(
             "apply_completed prune_managed=%s immediate_sync_requested=%s immediate_sync_ran=%s",
             report.prune_managed,
             report.immediate_sync_requested,
@@ -245,17 +253,15 @@ class WorkspaceService:
     def provider_verify(self, workspace_dir: str | Path) -> ProviderVerification:
         """Verify Cloudflare token, zone lookup, and DNS listing access."""
 
-        loaded, logger = self._load_workspace_with_logger(
-            workspace_dir,
-            command_name="provider-verify",
-        )
+        loaded = self._storage.validate(workspace_dir)
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         provider = CloudflareDNSProvider(loaded.resolved_workspace.cloudflare_provider_config())
         try:
             report = provider.verify()
         except Exception:
-            logger.exception("provider verification failed")
+            LOGGER.exception("provider verification failed")
             raise
-        logger.info(
+        LOGGER.info(
             "provider_verified zone_name=%s zone_id=%s record_listing_succeeded=%s",
             report.zone_name,
             report.zone_id,
@@ -273,12 +279,15 @@ class WorkspaceService:
         zone_name: str | None = None
         zone_id: str | None = None
         token_file: str | None = None
+        systemd_unit_dir: str | None = None
         entry_count = 0
         enabled_entry_count = 0
         service_name = "unknown"
         timer_name = "unknown"
+        loaded: LoadedWorkspace | None = None
 
         paths = self._storage.paths_for(workspace_dir)
+        resolved_log_file = paths.runtime_log_file
         try:
             loaded = self._storage.load(workspace_dir)
             workspace_name = loaded.resolved_workspace.workspace_name
@@ -286,16 +295,35 @@ class WorkspaceService:
             zone_name = loaded.resolved_workspace.zone_name
             zone_id = loaded.resolved_workspace.zone_id
             token_file = loaded.resolved_workspace.api_token_file
+            systemd_unit_dir = str(loaded.resolved_workspace.paths.resolved_systemd_unit_dir())
             entry_count = len(loaded.entries_file.entries)
             enabled_entry_count = len(loaded.entries_file.enabled_entries())
             service_name = loaded.resolved_workspace.systemd.service_name
             timer_name = loaded.resolved_workspace.systemd.timer_name
+            resolved_log_file = _resolved_workspace_log_file(
+                loaded,
+                fallback=paths.runtime_log_file,
+            )
         except Exception as exc:
             errors.append(str(exc))
 
         managed_state = load_managed_records(paths)
         active_count, stale_count = managed_record_counts(managed_state)
         last_apply = load_last_apply(paths)
+        if loaded is None:
+            service_status = _unavailable_unit_status(service_name, "service")
+            timer_status = _unavailable_unit_status(timer_name, "timer")
+        else:
+            service_status = self._systemd_manager.status(
+                loaded.resolved_workspace,
+                service_name,
+                "service",
+            )
+            timer_status = self._systemd_manager.status(
+                loaded.resolved_workspace,
+                timer_name,
+                "timer",
+            )
 
         return WorkspaceStatus(
             workspace_root=str(paths.root),
@@ -304,6 +332,7 @@ class WorkspaceService:
             zone_name=zone_name,
             zone_id=zone_id,
             token_file=token_file,
+            systemd_unit_dir=systemd_unit_dir,
             entry_count=entry_count,
             enabled_entry_count=enabled_entry_count,
             rendered_artifacts={
@@ -313,13 +342,14 @@ class WorkspaceService:
                 "timer_unit": (paths.rendered_systemd_dir / f"{timer_name}.timer").exists(),
             },
             runtime_dir_exists=paths.runtime_dir.exists(),
-            runtime_log_file=str(paths.runtime_log_file),
-            runtime_log_file_exists=paths.runtime_log_file.exists(),
+            runtime_log_file=str(resolved_log_file),
+            runtime_log_file_exists=_path_exists_or_symlink(resolved_log_file),
+            runtime_log_symlink_target=_symlink_target(resolved_log_file),
             managed_active_count=active_count,
             managed_stale_count=stale_count,
             last_apply=last_apply,
-            service_status=self._systemd_manager.status(service_name, "service"),
-            timer_status=self._systemd_manager.status(timer_name, "timer"),
+            service_status=service_status,
+            timer_status=timer_status,
             warnings=warnings,
             errors=errors,
         )
@@ -357,6 +387,7 @@ class WorkspaceService:
         except Exception as exc:
             checks.append(DoctorCheck(name="workspace_load", status="error", message=str(exc)))
             return DoctorReport(workspace_root=str(paths.root), checks=checks)
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
 
         token_path = Path(loaded.resolved_workspace.api_token_file)
         token_status: Literal["ok", "warn", "error"] = "ok"
@@ -378,9 +409,10 @@ class WorkspaceService:
         checks.append(DoctorCheck(name="token_file", status=token_status, message=token_message))
 
         for command_name in (
-            loaded.app_config.discovery.pct_bin,
-            loaded.app_config.discovery.qm_bin,
-            loaded.app_config.systemd.systemctl_bin,
+            loaded.resolved_workspace.paths.pct_bin,
+            loaded.resolved_workspace.paths.qm_bin,
+            loaded.resolved_workspace.paths.shell_bin,
+            loaded.resolved_workspace.paths.systemctl_bin,
         ):
             checks.append(
                 DoctorCheck(
@@ -393,8 +425,15 @@ class WorkspaceService:
         checks.append(
             DoctorCheck(
                 name="systemd_unit_dir",
-                status="ok" if self._systemd_manager.unit_dir_writable() else "warn",
-                message=f"systemd unit dir: {self._app_config.systemd.resolved_unit_dir()}",
+                status=(
+                    "ok"
+                    if self._systemd_manager.unit_dir_writable(loaded.resolved_workspace)
+                    else "warn"
+                ),
+                message=(
+                    "systemd unit dir: "
+                    f"{loaded.resolved_workspace.paths.resolved_systemd_unit_dir()}"
+                ),
             )
         )
 
@@ -415,27 +454,28 @@ class WorkspaceService:
         checks.append(
             DoctorCheck(
                 name="runtime_log_target",
-                status="ok" if _path_write_target_available(paths.runtime_log_file) else "warn",
-                message=f"runtime log file: {paths.runtime_log_file}",
+                status=(
+                    "ok"
+                    if _path_write_target_available(
+                        _resolved_workspace_log_file(loaded, fallback=paths.runtime_log_file)
+                    )
+                    else "warn"
+                ),
+                message=(
+                    "runtime log file: "
+                    f"{_resolved_workspace_log_file(loaded, fallback=paths.runtime_log_file)}"
+                ),
             )
         )
 
-        logger: LoggerAdapter[Logger] | None = None
-        if paths.runtime_dir.exists():
-            logger = workspace_command_logger(
-                loaded.paths,
-                workspace_name=loaded.resolved_workspace.workspace_name,
-                command_name="doctor",
-            )
-        if logger is not None:
-            for check in checks:
-                if check.status != "ok":
-                    logger.warning(
-                        "doctor_check name=%s status=%s message=%s",
-                        check.name,
-                        check.status,
-                        check.message,
-                    )
+        for check in checks:
+            if check.status != "ok":
+                LOGGER.warning(
+                    "doctor_check name=%s status=%s message=%s",
+                    check.name,
+                    check.status,
+                    check.message,
+                )
 
         return DoctorReport(workspace_root=str(paths.root), checks=checks)
 
@@ -454,22 +494,24 @@ class WorkspaceService:
                 workspace_root=loaded.paths.root,
                 allow_workspace_root=True,
             )
-        logger = workspace_command_logger(
-            loaded.paths,
-            workspace_name=loaded.resolved_workspace.workspace_name,
-            command_name="uninstall",
-        )
+        LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         report = UninstallReport(
             workspace_root=str(loaded.paths.root),
             workspace_name=loaded.resolved_workspace.workspace_name,
             service_name=loaded.resolved_workspace.systemd.service_name,
             timer_name=loaded.resolved_workspace.systemd.timer_name,
-            systemctl_available=self._systemd_manager.systemctl_available(),
+            systemctl_available=self._systemd_manager.systemctl_available(
+                loaded.resolved_workspace
+            ),
         )
-        logger.info("uninstall_started purge=%s", purge)
+        LOGGER.info("uninstall_started purge=%s", purge)
 
         if report.systemctl_available:
-            service_stop = self._systemd_manager.stop_service(report.service_name, check=False)
+            service_stop = self._systemd_manager.stop_service(
+                loaded.resolved_workspace,
+                report.service_name,
+                check=False,
+            )
             if service_stop.returncode == 0:
                 report.service_stopped = True
             else:
@@ -477,7 +519,11 @@ class WorkspaceService:
                     _systemctl_warning("stop service", report.service_name, service_stop)
                 )
 
-            timer_stop = self._systemd_manager.stop_timer(report.timer_name, check=False)
+            timer_stop = self._systemd_manager.stop_timer(
+                loaded.resolved_workspace,
+                report.timer_name,
+                check=False,
+            )
             if timer_stop.returncode == 0:
                 report.timer_stopped = True
             else:
@@ -485,7 +531,11 @@ class WorkspaceService:
                     _systemctl_warning("stop timer", report.timer_name, timer_stop)
                 )
 
-            timer_disable = self._systemd_manager.disable_timer(report.timer_name, check=False)
+            timer_disable = self._systemd_manager.disable_timer(
+                loaded.resolved_workspace,
+                report.timer_name,
+                check=False,
+            )
             if timer_disable.returncode == 0:
                 report.timer_disabled = True
             else:
@@ -496,6 +546,7 @@ class WorkspaceService:
             report.warnings.append("systemctl is not available; skipped stop/disable/daemon-reload")
 
         removed_service = self._systemd_manager.remove_installed_unit(
+            loaded.resolved_workspace,
             report.service_name,
             "service",
         )
@@ -503,23 +554,38 @@ class WorkspaceService:
         if removed_service is not None:
             report.removed_paths.append(str(removed_service))
         else:
+            missing_service_path = self._systemd_manager.installed_unit_path(
+                loaded.resolved_workspace,
+                report.service_name,
+                "service",
+            )
             report.warnings.append(
-                f"service unit already absent: "
-                f"{self._systemd_manager.installed_unit_path(report.service_name, 'service')}"
+                f"service unit already absent: {missing_service_path}"
             )
 
-        removed_timer = self._systemd_manager.remove_installed_unit(report.timer_name, "timer")
+        removed_timer = self._systemd_manager.remove_installed_unit(
+            loaded.resolved_workspace,
+            report.timer_name,
+            "timer",
+        )
         report.timer_unit_removed = removed_timer is not None
         if removed_timer is not None:
             report.removed_paths.append(str(removed_timer))
         else:
+            missing_timer_path = self._systemd_manager.installed_unit_path(
+                loaded.resolved_workspace,
+                report.timer_name,
+                "timer",
+            )
             report.warnings.append(
-                f"timer unit already absent: "
-                f"{self._systemd_manager.installed_unit_path(report.timer_name, 'timer')}"
+                f"timer unit already absent: {missing_timer_path}"
             )
 
         if report.systemctl_available:
-            daemon_reload = self._systemd_manager.daemon_reload(check=False)
+            daemon_reload = self._systemd_manager.daemon_reload(
+                loaded.resolved_workspace,
+                check=False,
+            )
             if daemon_reload.returncode == 0:
                 report.daemon_reloaded = True
             else:
@@ -528,6 +594,7 @@ class WorkspaceService:
                 )
 
             service_reset = self._systemd_manager.reset_failed(
+                loaded.resolved_workspace,
                 report.service_name,
                 "service",
                 check=False,
@@ -540,6 +607,7 @@ class WorkspaceService:
                 )
 
             timer_reset = self._systemd_manager.reset_failed(
+                loaded.resolved_workspace,
                 report.timer_name,
                 "timer",
                 check=False,
@@ -551,7 +619,7 @@ class WorkspaceService:
                     _systemctl_warning("reset-failed", report.timer_name, timer_reset)
                 )
 
-        logger.info(
+        LOGGER.info(
             "systemd_cleanup service_stopped=%s timer_stopped=%s timer_disabled=%s "
             "service_unit_removed=%s timer_unit_removed=%s daemon_reloaded=%s "
             "service_reset_failed=%s timer_reset_failed=%s",
@@ -565,9 +633,7 @@ class WorkspaceService:
             report.timer_reset_failed,
         )
         for warning in report.warnings:
-            logger.warning("warning=%s", warning)
-
-        close_workspace_logger(logger)
+            LOGGER.warning("warning=%s", warning)
         _remove_workspace_path(loaded.paths.rendered_dir, report=report)
         _remove_workspace_path(loaded.paths.runtime_dir, report=report)
 
@@ -594,34 +660,11 @@ class WorkspaceService:
             return loaded.resolved_workspace.apply.prune_managed_records
         return override
 
-    def _load_workspace_with_logger(
-        self,
-        workspace_dir: str | Path,
-        *,
-        command_name: str,
-        runtime_validate: bool = True,
-    ) -> tuple[LoadedWorkspace, LoggerAdapter[Logger]]:
-        loaded = self._storage.load(workspace_dir)
-        logger = workspace_command_logger(
-            loaded.paths,
-            workspace_name=loaded.resolved_workspace.workspace_name,
-            command_name=command_name,
-        )
-        logger.info("command_started workspace_root=%s", loaded.paths.root)
-        if runtime_validate:
-            try:
-                self._storage.validate_loaded(loaded)
-            except Exception:
-                logger.exception("runtime validation failed")
-                raise
-        return loaded, logger
-
     def _log_run_report(
         self,
-        logger: LoggerAdapter[Logger],
         report: WorkspaceRunReport,
     ) -> None:
-        logger.info(
+        LOGGER.info(
             "run_summary dry_run=%s records=%d prune_candidates=%d warnings=%d",
             report.dry_run,
             len(report.record_outcomes),
@@ -632,7 +675,7 @@ class WorkspaceService:
             actions = "-"
             if outcome.plan is not None:
                 actions = ",".join(change.action for change in outcome.plan.changes)
-            log_fn = logger.error if outcome.status == "error" else logger.info
+            log_fn = LOGGER.error if outcome.status == "error" else LOGGER.info
             log_fn(
                 "entry=%s fqdn=%s type=%s family=%s source=%s selection=%s selected=%s "
                 "action=%s status=%s message=%s",
@@ -651,7 +694,7 @@ class WorkspaceService:
             actions = "-"
             if prune_outcome.plan is not None:
                 actions = ",".join(change.action for change in prune_outcome.plan.changes)
-            log_fn = logger.error if prune_outcome.status == "error" else logger.info
+            log_fn = LOGGER.error if prune_outcome.status == "error" else LOGGER.info
             log_fn(
                 "prune_entry=%s fqdn=%s type=%s record_id=%s action=%s status=%s message=%s",
                 prune_outcome.entry_name,
@@ -663,7 +706,7 @@ class WorkspaceService:
                 prune_outcome.message,
             )
         for warning in report.warnings:
-            logger.warning("warning=%s", warning)
+            LOGGER.warning("warning=%s", warning)
 
     def _reconcile_managed_state(
         self,
@@ -798,6 +841,29 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 def _path_write_target_available(path: Path) -> bool:
     target = path if path.exists() else path.parent
     return target.exists() and target.is_dir() and os.access(target, os.W_OK)
+
+
+def _resolved_workspace_log_file(loaded: LoadedWorkspace, *, fallback: Path) -> Path:
+    resolved = loaded.resolved_workspace.arbor_ddns_logging.resolved_file_path()
+    return resolved if resolved is not None else fallback
+
+
+def _unavailable_unit_status(unit_name: str, unit_kind: str) -> SystemdUnitStatus:
+    return SystemdUnitStatus(
+        unit_name=f"{unit_name}.{unit_kind}",
+        available=False,
+        note="workspace could not be loaded",
+    )
+
+
+def _path_exists_or_symlink(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def _symlink_target(path: Path) -> str | None:
+    if not path.is_symlink():
+        return None
+    return str(path.resolve())
 
 
 def _systemctl_warning(action: str, unit_name: str, result: CommandResult) -> str:

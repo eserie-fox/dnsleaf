@@ -8,7 +8,14 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from arbor_ddns.config.merge import deep_merge
+from arbor_ddns.config.scaffold import (
+    load_entries_scaffold_defaults,
+    load_workspace_scaffold_defaults,
+)
+from arbor_ddns.config.shared import DiscoveryCommandPaths
 from arbor_ddns.dns.cloudflare import CloudflareProviderConfig
+from arbor_ddns.logging.config import ArborDDNSLoggingConfig, ResolvedArborDDNSLoggingConfig
 from arbor_ddns.models import EntryAddressFamily, EntrySourceKind, IPAddressFamily, TargetRef
 from arbor_ddns.util.ip import normalize_ip
 
@@ -73,6 +80,40 @@ class WorkspaceApplyConfig(BaseModel):
     prune_managed_records: bool
 
 
+class WorkspaceRuntimePaths(DiscoveryCommandPaths):
+    """Workspace-scoped execution paths and command locations."""
+
+    systemctl_bin: str
+    systemd_unit_dir: str
+
+    @field_validator("systemctl_bin", "systemd_unit_dir")
+    @classmethod
+    def _validate_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("workspace paths values must not be blank")
+        return stripped
+
+    def resolved_systemd_unit_dir(self, workspace_root: Path) -> Path:
+        """Resolve the configured systemd unit directory against the workspace root."""
+
+        raw_path = Path(self.systemd_unit_dir).expanduser()
+        if raw_path.is_absolute():
+            return raw_path.resolve()
+        return (workspace_root / raw_path).resolve()
+
+    def resolve(self, workspace_root: Path) -> ResolvedWorkspaceRuntimePaths:
+        """Resolve runtime-only path values."""
+
+        return ResolvedWorkspaceRuntimePaths(
+            pct_bin=self.pct_bin,
+            qm_bin=self.qm_bin,
+            shell_bin=self.shell_bin,
+            systemctl_bin=self.systemctl_bin,
+            systemd_unit_dir=str(self.resolved_systemd_unit_dir(workspace_root)),
+        )
+
+
 class WorkspaceConfig(BaseModel):
     """User-maintained workspace source config."""
 
@@ -86,14 +127,16 @@ class WorkspaceConfig(BaseModel):
     api_token_file: str
     default_ttl: int = Field(ge=1)
     default_proxied: bool
+    paths: WorkspaceRuntimePaths
     systemd: WorkspaceSystemdConfig
     apply: WorkspaceApplyConfig
+    arbor_ddns_logging: ArborDDNSLoggingConfig
 
     @field_validator("config_version")
     @classmethod
     def _validate_config_version(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("config_version must be >= 1")
+        if value != 3:
+            raise ValueError("workspace config_version must be exactly 3")
         return value
 
     @field_validator("workspace_name")
@@ -143,6 +186,16 @@ class WorkspaceConfig(BaseModel):
 
         return self.systemd.resolved_timer_name(self.workspace_name)
 
+    @classmethod
+    def scaffold_defaults(cls, workspace_name: str) -> WorkspaceConfig:
+        """Build the typed default `workspace.yaml` model for one workspace name."""
+
+        workspace_mapping = deep_merge(
+            load_workspace_scaffold_defaults(),
+            {"workspace_name": workspace_name},
+        )
+        return cls.model_validate(workspace_mapping)
+
     def resolve(self, workspace_root: Path) -> ResolvedWorkspace:
         """Resolve runtime-only workspace values."""
 
@@ -155,6 +208,7 @@ class WorkspaceConfig(BaseModel):
             api_token_file=str(self.resolved_api_token_file(workspace_root)),
             default_ttl=self.default_ttl,
             default_proxied=self.default_proxied,
+            paths=self.paths.resolve(workspace_root),
             systemd=ResolvedWorkspaceSystemdConfig(
                 service_name=self.resolved_service_name(),
                 timer_name=self.resolved_timer_name(),
@@ -163,6 +217,7 @@ class WorkspaceConfig(BaseModel):
                 run_sync_after_apply=self.systemd.run_sync_after_apply,
             ),
             apply=self.apply,
+            arbor_ddns_logging=self.arbor_ddns_logging.resolve(workspace_root),
         )
 
 
@@ -341,6 +396,12 @@ class EntriesFile(BaseModel):
                 return entry
         return None
 
+    @classmethod
+    def scaffold_defaults(cls) -> EntriesFile:
+        """Build the typed default `entries.yaml` model."""
+
+        return cls.model_validate(load_entries_scaffold_defaults())
+
 
 class ResolvedWorkspaceSystemdConfig(BaseModel):
     """Runtime-resolved systemd config."""
@@ -353,6 +414,22 @@ class ResolvedWorkspaceSystemdConfig(BaseModel):
     on_unit_active_sec: str
     run_sync_after_apply: bool
 
+
+class ResolvedWorkspaceRuntimePaths(BaseModel):
+    """Runtime-resolved workspace execution paths."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pct_bin: str
+    qm_bin: str
+    shell_bin: str
+    systemctl_bin: str
+    systemd_unit_dir: str
+
+    def resolved_systemd_unit_dir(self) -> Path:
+        """Return the absolute systemd unit directory."""
+
+        return Path(self.systemd_unit_dir)
 
 class ResolvedWorkspace(BaseModel):
     """Runtime-resolved workspace config."""
@@ -367,8 +444,10 @@ class ResolvedWorkspace(BaseModel):
     api_token_file: str
     default_ttl: int
     default_proxied: bool
+    paths: ResolvedWorkspaceRuntimePaths
     systemd: ResolvedWorkspaceSystemdConfig
     apply: WorkspaceApplyConfig
+    arbor_ddns_logging: ResolvedArborDDNSLoggingConfig
 
     def cloudflare_provider_config(self) -> CloudflareProviderConfig:
         """Build a Cloudflare provider config from the resolved workspace."""
@@ -549,12 +628,14 @@ class WorkspaceStatus(BaseModel):
     zone_name: str | None
     zone_id: str | None
     token_file: str | None
+    systemd_unit_dir: str | None = None
     entry_count: int
     enabled_entry_count: int
     rendered_artifacts: dict[str, bool]
     runtime_dir_exists: bool
     runtime_log_file: str
     runtime_log_file_exists: bool
+    runtime_log_symlink_target: str | None = None
     managed_active_count: int
     managed_stale_count: int
     last_apply: LastApplyState | None = None
