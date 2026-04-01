@@ -93,9 +93,9 @@ The default scaffold uses:
 - stable path: `runtime/logs/arbor-ddns.log`
 - daily target files: `runtime/logs/arbor-ddns-YYYY-MM-DD.log`
 - retention: `7`
-- stream: `stderr`
+- stream: `none`
 
-This logging schema is shared with the outside-workspace config. The only common default difference is that outside-workspace logging uses `file_path: null`.
+This logging schema is shared with the outside-workspace config, but the defaults differ by context: workspace scaffolds default to file-only logger output, while outside-workspace logging keeps `file_path: null` and `stream: stderr`.
 
 ### `entries.yaml`
 
@@ -122,6 +122,15 @@ arbor-ddns validate
 arbor-ddns plan
 arbor-ddns apply
 ```
+
+If one of these commands needs root privileges and you are not root but do have `sudo`, prefer appending `--sudo`:
+
+```bash
+arbor-ddns apply --sudo
+arbor-ddns plan --sudo
+```
+
+This is especially useful when arbor-ddns is installed from a virtualenv or another managed Python environment where plain `sudo arbor-ddns ...` may not resolve the same script or interpreter. The CLI re-executes the current command through the active entrypoint and prints a retry hint when you forget `--sudo`.
 
 ### `init`
 
@@ -204,3 +213,10 @@ arbor-ddns apply
 - if `--workspace` is provided, workspace paths and workspace logging are used
 - if `--workspace` is omitted and the current directory is a valid workspace, that workspace is used
 - otherwise `discover` falls back to the outside-workspace config for `pct`, `qm`, and `shell`
+
+The low-level discover commands also accept `--sudo`, which is useful when guest discovery needs elevated privileges on the PVE host:
+
+```bash
+arbor-ddns discover lxc 101 --sudo
+arbor-ddns discover vm 201 --sudo
+```

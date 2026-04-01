@@ -29,6 +29,6 @@
     "format": "%(asctime)s level=%(levelname)s name=%(name)s workspace=%(workspace_name)s command=%(command_name)s %(message)s",
     "file_path": "runtime/logs/arbor-ddns.log",
     "retention_days": 7,
-    "stream": "stderr"
+    "stream": "none"
   }
 }

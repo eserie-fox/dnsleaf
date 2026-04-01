@@ -6,6 +6,7 @@ from pathlib import Path
 
 import typer
 
+from arbor_ddns.commands import _privilege_analysis as privilege_analysis
 from arbor_ddns.commands import common
 from arbor_ddns.models import EntryAddressFamily, TargetKind, TargetRef
 from arbor_ddns.workspace.storage import LoadedWorkspace, WorkspaceStorage
@@ -24,8 +25,17 @@ DISCOVER_WORKSPACE_OPTION = typer.Option(
 def register(app: typer.Typer) -> None:
     """Register `discover` commands."""
 
-    discover_app = typer.Typer(help="Run low-level discovery/debug commands.")
+    discover_app = typer.Typer(
+        help="Run low-level discovery/debug commands.",
+        invoke_without_command=True,
+    )
     app.add_typer(discover_app, name="discover")
+
+    @discover_app.callback()
+    def discover_callback(ctx: typer.Context) -> None:
+        if ctx.invoked_subcommand is None:
+            typer.echo(ctx.get_help())
+            raise typer.Exit()
 
     @discover_app.command("lxc")
     def discover_lxc_command(
@@ -34,10 +44,20 @@ def register(app: typer.Typer) -> None:
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
         workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Discover IP candidates for an LXC guest."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_discover_root_requirements(
+                    TargetKind.LXC,
+                    workspace=workspace,
+                ),
+                sudo_requested=sudo,
+            ):
+                return
             _run_discover(
                 ctx,
                 TargetKind.LXC,
@@ -56,10 +76,20 @@ def register(app: typer.Typer) -> None:
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
         workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Discover IP candidates for a VM guest."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_discover_root_requirements(
+                    TargetKind.VM,
+                    workspace=workspace,
+                ),
+                sudo_requested=sudo,
+            ):
+                return
             _run_discover(
                 ctx,
                 TargetKind.VM,

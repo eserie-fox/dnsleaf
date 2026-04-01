@@ -250,7 +250,7 @@ class SystemdManager:
         return [
             str(Path(sys.executable).resolve()),
             "-m",
-            "arbor_ddns.cli",
+            "arbor_ddns",
             "sync-once",
             "--workspace",
             str(workspace_root),

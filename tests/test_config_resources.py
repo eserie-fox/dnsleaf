@@ -26,6 +26,7 @@ def test_config_default_resources_are_readable_via_package_loaders() -> None:
     assert outside_workspace_defaults["paths"]["pct_bin"] == "pct"
     assert workspace_defaults["config_version"] == 3
     assert workspace_defaults["arbor_ddns_logging"]["file_path"] == "runtime/logs/arbor-ddns.log"
+    assert workspace_defaults["arbor_ddns_logging"]["stream"] == "none"
     assert workspace_defaults["paths"]["systemctl_bin"] == "systemctl"
     assert entries_defaults == {"config_version": 2, "entries": []}
     assert "runtime/logs" in layout.directories

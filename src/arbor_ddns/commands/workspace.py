@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from arbor_ddns.commands import _privilege_analysis as privilege_analysis
 from arbor_ddns.commands import common
 
 
@@ -17,10 +18,17 @@ def register(app: typer.Typer) -> None:
     def init_command(
         ctx: typer.Context,
         directory: Path,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Initialize a new workspace directory."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_init_root_requirements(directory),
+                sudo_requested=sudo,
+            ):
+                return
             created = common.workspace_service(ctx).init_workspace(directory)
         except Exception as exc:
             common.exit_with_error(exc)
@@ -31,10 +39,17 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Validate a workspace."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_validate_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="validate"):
                 report = common.workspace_service(ctx).validate_workspace(workspace)
         except Exception as exc:
@@ -46,10 +61,17 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Render workspace artifacts without applying them."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_render_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="render"):
                 report = common.workspace_service(ctx).render_workspace(workspace)
         except Exception as exc:
@@ -61,6 +83,7 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         prune_managed: Annotated[
             bool,
             typer.Option("--prune-managed", help="Override the workspace default and allow prune."),
@@ -86,6 +109,12 @@ def register(app: typer.Typer) -> None:
         prune_override = common.resolve_bool_override(prune_managed, no_prune_managed, "prune")
         run_sync_override = common.resolve_bool_override(run_sync, no_run_sync, "run-sync")
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_apply_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="apply"):
                 report = common.workspace_service(ctx).apply_workspace(
                     workspace,
@@ -103,6 +132,7 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         purge: Annotated[
             bool,
             typer.Option("--purge", help="Delete the entire workspace directory after uninstall."),
@@ -111,6 +141,15 @@ def register(app: typer.Typer) -> None:
         """Remove installed units and generated artifacts for a workspace."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_uninstall_root_requirements(
+                    workspace,
+                    purge=purge,
+                ),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="uninstall"):
                 report = common.workspace_service(ctx).uninstall_workspace(workspace, purge=purge)
         except Exception as exc:
@@ -122,10 +161,17 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Show aggregated workspace status."""
 
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_status_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             report = common.workspace_service(ctx).status_workspace(workspace)
         except Exception as exc:
             common.exit_with_error(exc, json_output=json_output)
@@ -138,10 +184,20 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
     ) -> None:
         """Run non-destructive workspace health checks."""
 
-        report = common.workspace_service(ctx).doctor_workspace(workspace)
+        try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_doctor_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
+            report = common.workspace_service(ctx).doctor_workspace(workspace)
+        except Exception as exc:
+            common.exit_with_error(exc, json_output=json_output)
         common.echo_model_or_text(report, json_output, common.format_doctor_report)
         if not report.ok:
             raise typer.Exit(code=1)
@@ -151,6 +207,7 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         prune_managed: Annotated[
             bool,
             typer.Option("--prune-managed", help="Include prune planning."),
@@ -164,6 +221,12 @@ def register(app: typer.Typer) -> None:
 
         prune_override = common.resolve_bool_override(prune_managed, no_prune_managed, "prune")
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_plan_root_requirements(workspace),
+                sudo_requested=sudo,
+            ):
+                return
             with common.workspace_command_logging(ctx, workspace, command_name="plan"):
                 report = common.workspace_service(ctx).plan_workspace(
                     workspace,
@@ -180,6 +243,7 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         workspace: Path = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
+        sudo: bool = common.SUDO_OPTION,
         apply: Annotated[
             bool,
             typer.Option("--apply", help="Apply changes instead of printing a dry-run report."),
@@ -197,6 +261,15 @@ def register(app: typer.Typer) -> None:
 
         prune_override = common.resolve_bool_override(prune_managed, no_prune_managed, "prune")
         try:
+            if common.enforce_root_privileges(
+                ctx,
+                reasons=privilege_analysis.analyze_sync_once_root_requirements(
+                    workspace,
+                    apply=apply,
+                ),
+                sudo_requested=sudo,
+            ):
+                return
             command_name = "sync-once-apply" if apply else "sync-once"
             with common.workspace_command_logging(ctx, workspace, command_name=command_name):
                 report = common.workspace_service(ctx).sync_once(

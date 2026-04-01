@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,6 +11,14 @@ from typing import Any
 
 import typer
 
+from arbor_ddns.commands._privilege import (
+    PermissionOperationError,
+    UnsupportedSudoReexecParameterError,
+    command_args_from_ctx,
+    current_user_is_root,
+    ensure_root_privileges,
+    format_unsupported_sudo_reexec_message,
+)
 from arbor_ddns.config import OutsideWorkspaceConfig
 from arbor_ddns.dns.models import ProviderVerification
 from arbor_ddns.logging import workspace_logging_context
@@ -34,6 +43,11 @@ WORKSPACE_OPTION = typer.Option(
     help="Workspace directory. Defaults to the current directory.",
 )
 JSON_OPTION = typer.Option(False, "--json", help="Emit machine-friendly JSON.")
+SUDO_OPTION = typer.Option(
+    False,
+    "--sudo",
+    help="Re-exec the full command via sudo when elevated privileges are required.",
+)
 FAMILY_OPTION = typer.Option(
     ...,
     "--family",
@@ -76,6 +90,40 @@ def debug_runner(ctx: typer.Context) -> SyncRunner:
     """Build the low-level debug runner."""
 
     return build_runner(outside_workspace_config=outside_workspace_config_from_ctx(ctx))
+
+
+def command_operation(ctx: typer.Context) -> str:
+    """Return a stable human-readable operation label for the current command."""
+
+    return " ".join(ctx.command_path.split()[1:])
+
+
+def enforce_root_privileges(
+    ctx: typer.Context,
+    *,
+    reasons: list[str],
+    sudo_requested: bool,
+) -> bool:
+    """Fail fast or re-exec with sudo when the current command needs root privileges."""
+
+    if current_user_is_root() or not reasons:
+        return False
+    try:
+        command_args = command_args_from_ctx(ctx)
+    except UnsupportedSudoReexecParameterError as exc:
+        raise PermissionOperationError(
+            format_unsupported_sudo_reexec_message(
+                operation=command_operation(ctx),
+                detail=str(exc),
+                command_args=sys.argv[1:],
+            )
+        ) from exc
+    return ensure_root_privileges(
+        operation=command_operation(ctx),
+        reasons=reasons,
+        sudo_requested=sudo_requested,
+        command_args=command_args,
+    )
 
 
 @contextmanager
