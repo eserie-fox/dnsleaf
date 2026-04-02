@@ -15,15 +15,9 @@ def register(app: typer.Typer) -> None:
 
     provider_app = typer.Typer(
         help="Provider-specific operations.",
-        invoke_without_command=True,
+        no_args_is_help=True,
     )
     app.add_typer(provider_app, name="provider")
-
-    @provider_app.callback()
-    def provider_callback(ctx: typer.Context) -> None:
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit()
 
     @provider_app.command("verify")
     def provider_verify_command(

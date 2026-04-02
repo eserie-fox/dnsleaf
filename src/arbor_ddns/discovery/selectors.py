@@ -18,6 +18,8 @@ from arbor_ddns.util.ip import (
     unusable_ipv6_reason,
 )
 
+_UNUSABLE_IPV6_FLAGS = {"dadfailed", "deprecated", "tentative"}
+
 
 def select_address(
     result: DiscoveryResult,
@@ -221,7 +223,18 @@ def _unusable_reason(candidate: AddressCandidate) -> str | None:
     parsed = ip_address(candidate.address)
     if isinstance(parsed, IPv4Address):
         return unusable_ipv4_reason(parsed)
-    return unusable_ipv6_reason(parsed)
+    base_reason = unusable_ipv6_reason(parsed)
+    if base_reason is not None:
+        return base_reason
+    return _unusable_ipv6_flag_reason(candidate)
+
+
+def _unusable_ipv6_flag_reason(candidate: AddressCandidate) -> str | None:
+    for flag in candidate.flags:
+        normalized_flag = flag.lower()
+        if normalized_flag in _UNUSABLE_IPV6_FLAGS:
+            return normalized_flag
+    return None
 
 
 def _is_stable_ipv6_candidate(candidate: AddressCandidate) -> bool:

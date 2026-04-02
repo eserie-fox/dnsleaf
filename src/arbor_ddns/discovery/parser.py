@@ -13,15 +13,15 @@ from arbor_ddns.util.ip import parse_ip_interface
 
 LOGGER = logging.getLogger(__name__)
 _ADDRESS_RECORD_RE = re.compile(r"^\d+:\s+(?P<interface>\S+)(?P<rest>.*)$")
-_NOISE_VALUE_KEYS = {"brd", "metric", "peer", "preferred_lft", "valid_lft"}
+_TAIL_METADATA_KEYS = {"brd", "metric", "peer", "preferred_lft", "proto", "valid_lft"}
 
 
 def parse_ip_addr_output(output: str, *, source: str = "ip_addr") -> list[AddressCandidate]:
     """Parse Linux `ip -o addr show` output."""
 
     candidates: list[AddressCandidate] = []
-    for interface, record in _normalize_lxc_ip_addr_records(output):
-        parsed = _parse_lxc_ip_addr_record(record, interface=interface)
+    for interface, record in _normalize_ip_addr_records(output):
+        parsed = _parse_ip_addr_record(record, interface=interface)
         if parsed is None:
             continue
         address, prefix_length, family, scope, flags = parsed
@@ -37,12 +37,6 @@ def parse_ip_addr_output(output: str, *, source: str = "ip_addr") -> list[Addres
             )
         )
     return candidates
-
-
-def parse_lxc_ip_addr_output(output: str, *, source: str = "pve_lxc") -> list[AddressCandidate]:
-    """Compatibility wrapper for LXC discovery parsing."""
-
-    return parse_ip_addr_output(output, source=source)
 
 
 def parse_qga_interfaces(
@@ -177,7 +171,7 @@ def _parse_qga_address_item(
     )
 
 
-def _normalize_lxc_ip_addr_records(output: str) -> list[tuple[str, str]]:
+def _normalize_ip_addr_records(output: str) -> list[tuple[str, str]]:
     records: list[tuple[str, str]] = []
     current_interface: str | None = None
     current_record: str | None = None
@@ -232,7 +226,7 @@ def _contains_address_tokens(line: str) -> bool:
     return any(token in {"inet", "inet6"} for token in tokens)
 
 
-def _parse_lxc_ip_addr_record(
+def _parse_ip_addr_record(
     line: str,
     *,
     interface: str,
@@ -265,7 +259,7 @@ def _parse_ip_addr_tail(tokens: list[str], *, interface: str) -> tuple[str | Non
             scope = tokens[index + 1].rstrip("\\")
             index += 2
             continue
-        if token in _NOISE_VALUE_KEYS:
+        if token in _TAIL_METADATA_KEYS:
             index += 2
             continue
         if token == interface:

@@ -16,7 +16,7 @@ from arbor_ddns.discovery.pve_qga import PVEQGADiscoveryBackend
 from arbor_ddns.discovery.selectors import select_address
 from arbor_ddns.dns.base import DNSProvider
 from arbor_ddns.dns.cloudflare import CloudflareDNSProvider
-from arbor_ddns.dns.models import DesiredRecord, DNSRecord, SyncPlan
+from arbor_ddns.dns.models import DesiredRecord, DNSRecord, SyncPlan, cloudflare_effective_ttl
 from arbor_ddns.dns.planner import plan_dns_changes
 from arbor_ddns.models import EntrySourceKind, IPAddressFamily, TargetKind, TargetRef
 from arbor_ddns.workspace.models import ManagedRecordFile, ManagedRecordSnapshot, WorkspaceEntry
@@ -337,13 +337,17 @@ class SyncRunner:
         selection_status: str | None,
         selection_reason: str | None,
     ) -> RecordSyncOutcome:
+        proxied = entry.effective_proxied(loaded.resolved_workspace.default_proxied)
         desired = DesiredRecord(
             provider=loaded.resolved_workspace.provider,
             fqdn=entry.fqdn,
             record_type=family.record_type,
             value=value,
-            ttl=entry.effective_ttl(loaded.resolved_workspace.default_ttl),
-            proxied=entry.effective_proxied(loaded.resolved_workspace.default_proxied),
+            ttl=cloudflare_effective_ttl(
+                entry.effective_ttl(loaded.resolved_workspace.default_ttl),
+                proxied,
+            ),
+            proxied=proxied,
         )
 
         try:

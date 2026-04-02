@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml  # type: ignore[import-untyped]
+
 from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider
 
 from arbor_ddns.config import OutsideWorkspaceConfig
@@ -245,3 +247,51 @@ def test_runner_uses_outside_workspace_paths_for_discovery_fallback() -> None:
     assert isinstance(local_backend, LocalIPDiscoveryBackend)
     assert isinstance(vm_backend, PVEQGADiscoveryBackend)
     assert vm_backend._qm_bin == "/usr/sbin/qm"
+
+
+def test_runner_preserves_remote_proxy_state_when_proxy_is_unmanaged(tmp_path: Path) -> None:
+    loaded, storage = _prepare_loaded_workspace(
+        tmp_path,
+        (
+            "config_version: 2\n"
+            "entries:\n"
+            "  - name: web\n"
+            "    source_kind: lxc\n"
+            "    source_id: 101\n"
+            "    fqdn: host.example.com\n"
+            "    family: ipv6\n"
+            "    selection_policy: default\n"
+            "    enabled: true\n"
+        ),
+    )
+    workspace_yaml = yaml.safe_load((loaded.paths.workspace_file).read_text(encoding="utf-8"))
+    workspace_yaml["default_ttl"] = 300
+    workspace_yaml["default_proxied"] = None
+    loaded.paths.workspace_file.write_text(
+        yaml.safe_dump(workspace_yaml, sort_keys=False, allow_unicode=False),
+        encoding="utf-8",
+    )
+    loaded = storage.validate(loaded.paths.root)
+
+    current_record = DNSRecord(
+        provider="cloudflare",
+        fqdn="host.example.com",
+        record_type="AAAA",
+        value="2408:8266:5003:506a::3d6",
+        ttl=1,
+        proxied=True,
+        record_id="rec-1",
+    )
+    provider = FakeDNSProvider(initial_records=[current_record])
+    runner = _build_runner(provider)
+
+    report = runner.run(
+        loaded,
+        managed_state=ManagedRecordFile(),
+        apply=False,
+        prune_managed=False,
+    )
+
+    assert len(report.record_outcomes) == 1
+    assert report.record_outcomes[0].plan is not None
+    assert [change.action for change in report.record_outcomes[0].plan.changes] == ["noop"]

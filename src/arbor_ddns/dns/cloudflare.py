@@ -56,7 +56,7 @@ class CloudflareProviderConfig(BaseModel):
     zone_id: str | None
     api_token_file: str
     timeout_seconds: float = Field(gt=0)
-    proxied: bool
+    proxied: bool | None
     ttl: int = Field(ge=1)
 
     @field_validator("zone_name", "zone_id")
@@ -181,16 +181,18 @@ class CloudflareDNSProvider(DNSProvider):
         """Create a new A or AAAA record."""
 
         self._ensure_no_cname_conflict(desired.fqdn)
+        create_payload: dict[str, object] = {
+            "type": desired.record_type,
+            "name": desired.fqdn,
+            "content": desired.value,
+            "ttl": desired.ttl,
+        }
+        if desired.proxied is not None:
+            create_payload["proxied"] = desired.proxied
         payload = self._request_json(
             "POST",
             f"/zones/{self.resolve_zone_id()}/dns_records",
-            json_body={
-                "type": desired.record_type,
-                "name": desired.fqdn,
-                "content": desired.value,
-                "ttl": desired.ttl,
-                "proxied": desired.proxied,
-            },
+            json_body=create_payload,
         )
         return self._record_from_api_item(payload.get("result"))
 
@@ -201,9 +203,9 @@ class CloudflareDNSProvider(DNSProvider):
         patch: dict[str, object] = {}
         if current.value != desired.value:
             patch["content"] = desired.value
-        if current.ttl != desired.ttl:
+        if self._should_manage_ttl(current, desired) and current.ttl != desired.ttl:
             patch["ttl"] = desired.ttl
-        if current.proxied != desired.proxied:
+        if desired.proxied is not None and current.proxied != desired.proxied:
             patch["proxied"] = desired.proxied
         if not patch:
             return current
@@ -284,6 +286,9 @@ class CloudflareDNSProvider(DNSProvider):
             raise CloudflareConflictError(
                 f"cannot create A/AAAA record for {fqdn} because a CNAME record already exists"
             )
+
+    def _should_manage_ttl(self, current: DNSRecord, desired: DesiredRecord) -> bool:
+        return not (desired.proxied is None and current.proxied is True)
 
     def _request_json(
         self,

@@ -23,15 +23,15 @@ python -m build
 
 Expected outputs:
 
-- `dist/arbor_ddns-1.0.2.tar.gz`
-- `dist/arbor_ddns-1.0.2-py3-none-any.whl`
+- `dist/arbor_ddns-1.0.3.tar.gz`
+- `dist/arbor_ddns-1.0.3-py3-none-any.whl`
 
 ## Local install
 
 Install the built wheel into the target environment:
 
 ```bash
-pip install dist/arbor_ddns-1.0.2-py3-none-any.whl
+pip install dist/arbor_ddns-1.0.3-py3-none-any.whl
 ```
 
 If you are reinstalling over an older local build, use your normal `pip install --force-reinstall ...` workflow.
@@ -47,7 +47,7 @@ arbor-ddns --version
 Expected output:
 
 ```text
-1.0.2
+1.0.3
 ```
 
 ## Minimal smoke test
@@ -69,6 +69,7 @@ To validate a real workspace end-to-end:
 
 ## Release notes
 
+- [1.0.3 release notes](release-notes/1.0.3.md)
 - [1.0.2 release notes](release-notes/1.0.2.md)
 - [1.0.1 release notes](release-notes/1.0.1.md)
 - [1.0.0 release notes](release-notes/1.0.0.md)

@@ -11,6 +11,8 @@ def _candidate(
     *,
     family: IPAddressFamily,
     interface: str = "eth0",
+    scope: str | None = None,
+    flags: list[str] | None = None,
 ) -> AddressCandidate:
     return AddressCandidate(
         family=family,
@@ -18,6 +20,8 @@ def _candidate(
         address=address,
         prefix_length=prefix_length,
         source="test",
+        scope=scope,
+        flags=flags or [],
     )
 
 
@@ -75,6 +79,99 @@ def test_ipv6_selector_prefers_128_over_stable_64() -> None:
     assert selection.selected is not None
     assert selection.selected.prefix_length == 128
     assert selection.not_selected[0].reason == "lower priority than selected /128 candidate"
+
+
+def test_ipv6_selector_filters_deprecated_128_and_selects_healthy_64() -> None:
+    selection = select_address(
+        _result(
+            [
+                _candidate(
+                    "2408:8266:5003:506a::3d6",
+                    128,
+                    family=IPAddressFamily.IPV6,
+                    scope="global",
+                    flags=["deprecated", "dynamic", "mngtmpaddr"],
+                ),
+                _candidate(
+                    "2408:8266:5003:506a:be24:11ff:fefb:7700",
+                    64,
+                    family=IPAddressFamily.IPV6,
+                    scope="global",
+                    flags=["dynamic", "mngtmpaddr"],
+                ),
+            ]
+        ),
+        family=IPAddressFamily.IPV6,
+    )
+
+    assert selection.status == "selected"
+    assert selection.selected is not None
+    assert selection.selected.address == "2408:8266:5003:506a:be24:11ff:fefb:7700"
+    assert [(item.candidate.cidr, item.reason) for item in selection.filtered_out] == [
+        ("2408:8266:5003:506a::3d6/128", "deprecated")
+    ]
+
+
+def test_ipv6_selector_filters_tentative_candidate() -> None:
+    selection = select_address(
+        _result(
+            [
+                _candidate(
+                    "2408:8266:5003:506a::99",
+                    128,
+                    family=IPAddressFamily.IPV6,
+                    scope="global",
+                    flags=["tentative"],
+                ),
+                _candidate(
+                    "2408:8266:5003:506a:be24:11ff:feeb:aba3",
+                    64,
+                    family=IPAddressFamily.IPV6,
+                    scope="global",
+                    flags=["dynamic", "mngtmpaddr"],
+                ),
+            ]
+        ),
+        family=IPAddressFamily.IPV6,
+    )
+
+    assert selection.status == "selected"
+    assert selection.selected is not None
+    assert selection.selected.address == "2408:8266:5003:506a:be24:11ff:feeb:aba3"
+    assert [(item.candidate.cidr, item.reason) for item in selection.filtered_out] == [
+        ("2408:8266:5003:506a::99/128", "tentative")
+    ]
+
+
+def test_ipv6_selector_filters_dadfailed_candidate() -> None:
+    selection = select_address(
+        _result(
+            [
+                _candidate(
+                    "2408:8266:5003:506a::77",
+                    128,
+                    family=IPAddressFamily.IPV6,
+                    scope="global",
+                    flags=["dadfailed"],
+                ),
+                _candidate(
+                    "2408:8266:5003:506a:be24:11ff:fefb:7700",
+                    64,
+                    family=IPAddressFamily.IPV6,
+                    scope="global",
+                    flags=["dynamic", "mngtmpaddr"],
+                ),
+            ]
+        ),
+        family=IPAddressFamily.IPV6,
+    )
+
+    assert selection.status == "selected"
+    assert selection.selected is not None
+    assert selection.selected.address == "2408:8266:5003:506a:be24:11ff:fefb:7700"
+    assert [(item.candidate.cidr, item.reason) for item in selection.filtered_out] == [
+        ("2408:8266:5003:506a::77/128", "dadfailed")
+    ]
 
 
 def test_ipv6_selector_prefers_128_and_filters_link_local_for_vm_sample() -> None:

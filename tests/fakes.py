@@ -81,13 +81,23 @@ class FakeDNSProvider(DNSProvider):
         if change.action == "update":
             assert change.current is not None
             assert change.desired is not None
+            proxied = (
+                change.current.proxied
+                if change.desired.proxied is None
+                else change.desired.proxied
+            )
+            ttl = (
+                change.current.ttl
+                if change.desired.proxied is None and change.current.proxied is True
+                else change.desired.ttl
+            )
             updated = DNSRecord(
                 provider=self.name,
                 fqdn=change.desired.fqdn,
                 record_type=change.desired.record_type,
                 value=change.desired.value,
-                ttl=change.desired.ttl,
-                proxied=change.desired.proxied,
+                ttl=ttl,
+                proxied=proxied,
                 record_id=change.current.record_id,
             )
             existing = self._records.get(key, [])

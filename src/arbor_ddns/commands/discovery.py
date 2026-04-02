@@ -27,15 +27,9 @@ def register(app: typer.Typer) -> None:
 
     discover_app = typer.Typer(
         help="Run low-level discovery/debug commands.",
-        invoke_without_command=True,
+        no_args_is_help=True,
     )
     app.add_typer(discover_app, name="discover")
-
-    @discover_app.callback()
-    def discover_callback(ctx: typer.Context) -> None:
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit()
 
     @discover_app.command("lxc")
     def discover_lxc_command(

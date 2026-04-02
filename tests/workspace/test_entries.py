@@ -3,11 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
+from arbor_ddns.dns.models import AUTO_TTL
 from arbor_ddns.models import EntrySourceKind, TargetKind
 from arbor_ddns.workspace.entries import EntryService
-from arbor_ddns.workspace.models import WorkspaceEntry
+from arbor_ddns.workspace.models import WorkspaceConfig, WorkspaceEntry
 
 
 def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Path) -> None:
@@ -99,6 +101,119 @@ def test_entry_add_local_entry(workspace_dir: Path) -> None:
     assert added.entry.source_kind is EntrySourceKind.LOCAL
     assert added.entry.selection_policy == "default"
     assert added.entry.source_id is None
+
+
+def test_entry_service_accepts_auto_ttl(workspace_dir: Path) -> None:
+    service = EntryService()
+
+    added = service.add_entry(
+        workspace_dir,
+        name="web",
+        source_kind="lxc",
+        source_id=101,
+        fqdn="host.example.com",
+        family="ipv6",
+        ttl="auto",
+    )
+
+    assert added.entry is not None
+    assert added.entry.ttl == "auto"
+
+
+def test_workspace_config_accepts_auto_ttl_and_null_default_proxied(tmp_path: Path) -> None:
+    config = WorkspaceConfig.scaffold_defaults("lab")
+
+    resolved = config.resolve(tmp_path / "lab")
+
+    assert config.default_ttl == "auto"
+    assert config.default_proxied is None
+    assert resolved.default_ttl == AUTO_TTL
+    assert resolved.default_proxied is None
+
+
+def test_workspace_entry_effective_ttl_and_proxied_support_auto_and_null() -> None:
+    entry = WorkspaceEntry(
+        name="self",
+        source_kind="local",
+        fqdn="self.example.com",
+        family="ipv6",
+        selection_policy="default",
+        enabled=True,
+        ttl="auto",
+    )
+
+    assert entry.effective_ttl(default_ttl=300) == AUTO_TTL
+    assert entry.effective_proxied(default_proxied=None) is None
+
+
+def test_entry_update_leaves_existing_proxied_override_when_omitted(workspace_dir: Path) -> None:
+    service = EntryService()
+    service.add_entry(
+        workspace_dir,
+        name="web",
+        source_kind="lxc",
+        source_id=101,
+        fqdn="host.example.com",
+        family="ipv6",
+        proxied=True,
+    )
+
+    updated = service.update_entry(
+        workspace_dir,
+        name="web",
+        fqdn="new.example.com",
+    )
+
+    assert updated.entry is not None
+    assert updated.entry.proxied is True
+
+
+def test_entry_update_sets_proxied_false(workspace_dir: Path) -> None:
+    service = EntryService()
+    service.add_entry(
+        workspace_dir,
+        name="web",
+        source_kind="lxc",
+        source_id=101,
+        fqdn="host.example.com",
+        family="ipv6",
+        proxied=True,
+    )
+
+    updated = service.update_entry(
+        workspace_dir,
+        name="web",
+        proxied=False,
+    )
+
+    assert updated.entry is not None
+    assert updated.entry.proxied is False
+
+
+def test_entry_update_can_clear_proxied_override_to_inherit(workspace_dir: Path) -> None:
+    service = EntryService()
+    service.add_entry(
+        workspace_dir,
+        name="web",
+        source_kind="lxc",
+        source_id=101,
+        fqdn="host.example.com",
+        family="ipv6",
+        proxied=True,
+    )
+
+    updated = service.update_entry(
+        workspace_dir,
+        name="web",
+        inherit_proxied=True,
+    )
+    reloaded = service.list_entries(workspace_dir)
+    entries_payload = yaml.safe_load((workspace_dir / "entries.yaml").read_text(encoding="utf-8"))
+
+    assert updated.entry is not None
+    assert updated.entry.proxied is None
+    assert reloaded[0].proxied is None
+    assert "proxied" not in entries_payload["entries"][0]
 
 
 def test_workspace_entry_local_requires_selection_policy() -> None:
