@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arbor-ddns"
-version = "1.0.2"
+version = "1.0.3"
 description = "Lightweight workspace-driven Cloudflare DDNS for dynamic and static IP targets."
 readme = "README.md"
 requires-python = ">=3.11"

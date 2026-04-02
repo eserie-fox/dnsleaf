@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from arbor_ddns.discovery.parser import parse_ip_addr_output, parse_lxc_ip_addr_output
+from arbor_ddns.discovery.parser import parse_ip_addr_output
 from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
 from arbor_ddns.models import TargetKind, TargetRef
 from arbor_ddns.util.process import CommandResult
@@ -76,7 +76,22 @@ def test_parse_ip_addr_output_handles_multiline_ip_addr_show_style() -> None:
     ]
     assert candidates[0].flags == ["dynamic"]
     assert candidates[1].flags == ["dynamic", "mngtmpaddr"]
-    assert parse_lxc_ip_addr_output(sample_output) == parse_ip_addr_output(
-        sample_output,
-        source="pve_lxc",
-    )
+
+
+def test_parse_ip_addr_output_keeps_state_flags_but_ignores_proto_metadata() -> None:
+    sample_output = """
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+    inet6 2408:8266:5003:506a::3d6/128 scope global deprecated dynamic mngtmpaddr
+       proto kernel_ra valid_lft 123sec preferred_lft 0sec
+    inet6 2408:8266:5003:506a:be24:11ff:fefb:7700/64 scope global dynamic mngtmpaddr
+       proto kernel_ra valid_lft 31567sec preferred_lft 31567sec
+""".strip()
+
+    candidates = parse_ip_addr_output(sample_output)
+
+    assert [candidate.cidr for candidate in candidates] == [
+        "2408:8266:5003:506a::3d6/128",
+        "2408:8266:5003:506a:be24:11ff:fefb:7700/64",
+    ]
+    assert candidates[0].flags == ["deprecated", "dynamic", "mngtmpaddr"]
+    assert candidates[1].flags == ["dynamic", "mngtmpaddr"]

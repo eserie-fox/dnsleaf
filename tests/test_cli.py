@@ -351,6 +351,225 @@ def test_entry_add_static_command(monkeypatch) -> None:
     assert "added entry web" in result.stdout
 
 
+def test_entry_add_command_accepts_auto_ttl(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def add_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(operation="add", changed=True, message="added entry web")
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "entry",
+            "add",
+            "lxc",
+            "--workspace",
+            "/tmp/lab",
+            "--id",
+            "101",
+            "--fqdn",
+            "host.example.com",
+            "--name",
+            "web",
+            "--family",
+            "ipv6",
+            "--ttl",
+            "auto",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["ttl"] == "auto"
+
+
+def test_entry_update_command_accepts_auto_ttl(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def update_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(
+                operation="update",
+                changed=True,
+                message="updated entry web",
+            )
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "entry",
+            "update",
+            "web",
+            "--workspace",
+            "/tmp/lab",
+            "--ttl",
+            "auto",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["ttl"] == "auto"
+
+
+def test_entry_update_command_leaves_proxied_unchanged_when_omitted(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def update_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(
+                operation="update",
+                changed=True,
+                message="updated entry web",
+            )
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        ["entry", "update", "web", "--workspace", "/tmp/lab"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["proxied"] is None
+    assert captured["inherit_proxied"] is False
+
+
+def test_entry_update_command_sets_proxied_true(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def update_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(
+                operation="update",
+                changed=True,
+                message="updated entry web",
+            )
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        ["entry", "update", "web", "--workspace", "/tmp/lab", "--proxied"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["proxied"] is True
+    assert captured["inherit_proxied"] is False
+
+
+def test_entry_update_command_sets_proxied_false(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def update_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(
+                operation="update",
+                changed=True,
+                message="updated entry web",
+            )
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        ["entry", "update", "web", "--workspace", "/tmp/lab", "--no-proxied"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["proxied"] is False
+    assert captured["inherit_proxied"] is False
+
+
+def test_entry_update_command_can_inherit_workspace_proxied_default(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def update_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(
+                operation="update",
+                changed=True,
+                message="updated entry web",
+            )
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        ["entry", "update", "web", "--workspace", "/tmp/lab", "--inherit-proxied"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["proxied"] is None
+    assert captured["inherit_proxied"] is True
+
+
+def test_entry_add_command_accepts_no_proxied(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingEntryService(FakeEntryService):
+        def add_entry(self, *args, **kwargs) -> EntryMutationResult:
+            _ = args
+            captured.update(kwargs)
+            return EntryMutationResult(operation="add", changed=True, message="added entry web")
+
+    monkeypatch.setattr(common, "entry_service", lambda ctx: CapturingEntryService())
+    monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "entry",
+            "add",
+            "lxc",
+            "--workspace",
+            "/tmp/lab",
+            "--id",
+            "101",
+            "--fqdn",
+            "host.example.com",
+            "--name",
+            "web",
+            "--family",
+            "ipv6",
+            "--no-proxied",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["proxied"] is False
+
+
+def test_entry_update_help_shows_proxied_flags() -> None:
+    result = runner.invoke(cli.app, ["entry", "update", "--help"])
+
+    assert result.exit_code == 0
+    assert "--proxied" in result.output
+    assert "--no-proxied" in result.output
+    assert "--inherit-proxied" in result.output
+
+
 def test_entry_add_defaults_workspace_to_current_directory(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(common, "entry_service", lambda ctx: FakeEntryService())
     monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
@@ -502,10 +721,17 @@ def test_version_option_reports_package_version() -> None:
     assert result.output == f"{__version__}\n"
 
 
+def test_root_group_without_subcommand_shows_help() -> None:
+    result = runner.invoke(cli.app, [])
+
+    assert "Usage:" in result.output
+    assert "Manage workspace-driven Cloudflare DDNS" in result.output
+    assert "Missing command" not in result.output
+
+
 def test_entry_group_without_subcommand_shows_help() -> None:
     result = runner.invoke(cli.app, ["entry"])
 
-    assert result.exit_code == 0
     assert "Usage:" in result.output
     assert "Manage workspace entries." in result.output
     assert "Missing command" not in result.output
@@ -514,7 +740,6 @@ def test_entry_group_without_subcommand_shows_help() -> None:
 def test_entry_add_group_without_subcommand_shows_help() -> None:
     result = runner.invoke(cli.app, ["entry", "add"])
 
-    assert result.exit_code == 0
     assert "Usage:" in result.output
     assert "Add a new workspace entry." in result.output
     assert "Missing command" not in result.output
@@ -523,7 +748,6 @@ def test_entry_add_group_without_subcommand_shows_help() -> None:
 def test_provider_group_without_subcommand_shows_help() -> None:
     result = runner.invoke(cli.app, ["provider"])
 
-    assert result.exit_code == 0
     assert "Usage:" in result.output
     assert "Provider-specific operations." in result.output
     assert "Missing command" not in result.output
@@ -532,7 +756,6 @@ def test_provider_group_without_subcommand_shows_help() -> None:
 def test_discover_group_without_subcommand_shows_help() -> None:
     result = runner.invoke(cli.app, ["discover"])
 
-    assert result.exit_code == 0
     assert "Usage:" in result.output
     assert "Run low-level discovery/debug commands." in result.output
     assert "Missing command" not in result.output

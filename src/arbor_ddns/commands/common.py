@@ -20,7 +20,7 @@ from arbor_ddns.commands._privilege import (
     format_unsupported_sudo_reexec_message,
 )
 from arbor_ddns.config import OutsideWorkspaceConfig
-from arbor_ddns.dns.models import ProviderVerification
+from arbor_ddns.dns.models import ProviderVerification, TTLSetting, normalize_ttl_setting
 from arbor_ddns.logging import workspace_logging_context
 from arbor_ddns.models import EntryAddressFamily, EntrySourceKind
 from arbor_ddns.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
@@ -187,6 +187,17 @@ def resolve_bool_override(yes: bool, no: bool, label: str) -> bool | None:
     if no:
         return False
     return None
+
+
+def parse_ttl_option(value: str | None) -> TTLSetting | None:
+    """Parse a CLI TTL option as seconds or `auto`."""
+
+    if value is None:
+        return None
+    try:
+        return normalize_ttl_setting(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def format_validation_report(report: ValidationReport) -> None:

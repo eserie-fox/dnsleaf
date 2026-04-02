@@ -16,6 +16,14 @@ The Cloudflare provider is responsible for:
 
 The provider does not choose guest IP addresses.
 
+Cloudflare TTL and proxy behavior:
+
+- API TTL `1` means automatic TTL
+- proxied records use Cloudflare automatic TTL
+- arbor-ddns therefore treats `auto` as TTL `1`
+- when the desired proxy state is explicitly `true`, arbor-ddns compares and applies the provider-effective TTL `1`
+- when the desired proxy state is unmanaged (`proxied: null`) and the current Cloudflare record is already proxied, arbor-ddns ignores the forced auto-TTL mismatch instead of churning the record
+
 ## Planner responsibilities
 
 The planner compares:
@@ -31,6 +39,11 @@ It returns deterministic changes:
 - `noop`
 
 When a workspace entry has `family=both`, the runner simply constructs two independent desired records and sends them through the same planner.
+
+`proxied` is only part of the managed desired state when it is explicitly `true` or `false`.
+
+- explicit `true` or `false`: planner/provider enforce proxy state
+- `null`: planner/provider preserve the current remote proxy state
 
 ## Verify flow
 
@@ -53,6 +66,14 @@ When a workspace entry has `family=both`, the runner simply constructs two indep
 The token is never embedded directly in workspace source config.
 
 The workspace stores only `api_token_file`, and the provider reads and strips the file contents at runtime.
+
+## Preserve-mode semantics
+
+If a workspace or entry resolves to `proxied: null`:
+
+- create/update requests omit the `proxied` field
+- existing Cloudflare proxy status is preserved on update
+- TTL remains managed, except that a currently proxied remote record's forced automatic TTL does not trigger a pointless update by itself
 
 ## CNAME conflict handling
 

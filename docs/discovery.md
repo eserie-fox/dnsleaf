@@ -30,7 +30,9 @@ Parsed candidates keep:
 - prefix length
 - source backend
 - optional scope
-- optional flags
+- optional state flags from `ip addr`
+
+Metadata pairs such as `proto kernel_ra` are ignored instead of being mixed into the state-flag list.
 
 ## VM backend
 
@@ -50,9 +52,12 @@ The default IPv6 selector:
 - rejects link-local
 - rejects ULA
 - rejects other non-global IPv6 addresses
-- prefers a single `/128`
-- otherwise prefers a single stable candidate
+- rejects candidates marked `deprecated`, `tentative`, or `dadfailed`
+- prefers a single healthy `/128` after filtering
+- otherwise prefers a single stable candidate after filtering
 - refuses to guess when multiple equally plausible candidates remain
+
+This means deprecated or otherwise unusable `/128` candidates are filtered out before ranking, so they cannot outrank a healthy global `/64`.
 
 The default IPv4 selector:
 

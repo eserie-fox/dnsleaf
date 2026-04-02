@@ -17,26 +17,14 @@ def register(app: typer.Typer) -> None:
 
     entry_app = typer.Typer(
         help="Manage workspace entries.",
-        invoke_without_command=True,
+        no_args_is_help=True,
     )
     entry_add_app = typer.Typer(
         help="Add a new workspace entry.",
-        invoke_without_command=True,
+        no_args_is_help=True,
     )
     entry_app.add_typer(entry_add_app, name="add")
     app.add_typer(entry_app, name="entry")
-
-    @entry_app.callback()
-    def entry_callback(ctx: typer.Context) -> None:
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit()
-
-    @entry_add_app.callback()
-    def entry_add_callback(ctx: typer.Context) -> None:
-        if ctx.invoked_subcommand is None:
-            typer.echo(ctx.get_help())
-            raise typer.Exit()
 
     @entry_app.command("list")
     def entry_list_command(
@@ -78,8 +66,21 @@ def register(app: typer.Typer) -> None:
         family: EntryAddressFamily | None = None,
         selection_policy: Annotated[str | None, typer.Option("--selection-policy")] = None,
         enabled: Annotated[bool | None, typer.Option("--enabled")] = None,
-        ttl: Annotated[int | None, typer.Option("--ttl")] = None,
-        proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
+        ttl: Annotated[str | None, typer.Option("--ttl")] = None,
+        proxied: Annotated[
+            bool | None,
+            typer.Option(
+                "--proxied/--no-proxied",
+                help="Explicitly manage Cloudflare proxying for this entry.",
+            ),
+        ] = None,
+        inherit_proxied: Annotated[
+            bool,
+            typer.Option(
+                "--inherit-proxied",
+                help="Clear the entry-level proxied override and inherit the workspace default.",
+            ),
+        ] = False,
         source_id: Annotated[int | None, typer.Option("--id")] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
         static_ipv4: Annotated[str | None, typer.Option("--ipv4")] = None,
@@ -87,6 +88,11 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Update a workspace entry."""
 
+        parsed_ttl = common.parse_ttl_option(ttl)
+        if proxied is not None and inherit_proxied:
+            raise typer.BadParameter(
+                "cannot pass both --proxied/--no-proxied and --inherit-proxied"
+            )
         try:
             if common.enforce_root_privileges(
                 ctx,
@@ -102,8 +108,9 @@ def register(app: typer.Typer) -> None:
                     family=family.value if family is not None else None,
                     selection_policy=selection_policy,
                     enabled=enabled,
-                    ttl=ttl,
+                    ttl=parsed_ttl,
                     proxied=proxied,
+                    inherit_proxied=inherit_proxied,
                     source_id=source_id,
                     description=description,
                     static_ipv4=static_ipv4,
@@ -193,12 +200,19 @@ def register(app: typer.Typer) -> None:
         workspace: Path = common.WORKSPACE_OPTION,
         sudo: bool = common.SUDO_OPTION,
         selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
-        ttl: Annotated[int | None, typer.Option("--ttl")] = None,
-        proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
+        ttl: Annotated[str | None, typer.Option("--ttl")] = None,
+        proxied: Annotated[
+            bool | None,
+            typer.Option(
+                "--proxied/--no-proxied",
+                help="Explicitly manage Cloudflare proxying for this entry.",
+            ),
+        ] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
     ) -> None:
         """Add a dynamic LXC entry."""
 
+        parsed_ttl = common.parse_ttl_option(ttl)
         try:
             if common.enforce_root_privileges(
                 ctx,
@@ -215,7 +229,7 @@ def register(app: typer.Typer) -> None:
                     fqdn=fqdn,
                     family=family.value,
                     selection_policy=selection_policy,
-                    ttl=ttl,
+                    ttl=parsed_ttl,
                     proxied=proxied,
                     description=description,
                 )
@@ -233,12 +247,19 @@ def register(app: typer.Typer) -> None:
         workspace: Path = common.WORKSPACE_OPTION,
         sudo: bool = common.SUDO_OPTION,
         selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
-        ttl: Annotated[int | None, typer.Option("--ttl")] = None,
-        proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
+        ttl: Annotated[str | None, typer.Option("--ttl")] = None,
+        proxied: Annotated[
+            bool | None,
+            typer.Option(
+                "--proxied/--no-proxied",
+                help="Explicitly manage Cloudflare proxying for this entry.",
+            ),
+        ] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
     ) -> None:
         """Add a dynamic VM entry."""
 
+        parsed_ttl = common.parse_ttl_option(ttl)
         try:
             if common.enforce_root_privileges(
                 ctx,
@@ -255,7 +276,7 @@ def register(app: typer.Typer) -> None:
                     fqdn=fqdn,
                     family=family.value,
                     selection_policy=selection_policy,
-                    ttl=ttl,
+                    ttl=parsed_ttl,
                     proxied=proxied,
                     description=description,
                 )
@@ -272,12 +293,19 @@ def register(app: typer.Typer) -> None:
         workspace: Path = common.WORKSPACE_OPTION,
         sudo: bool = common.SUDO_OPTION,
         selection_policy: Annotated[str, typer.Option("--selection-policy")] = "default",
-        ttl: Annotated[int | None, typer.Option("--ttl")] = None,
-        proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
+        ttl: Annotated[str | None, typer.Option("--ttl")] = None,
+        proxied: Annotated[
+            bool | None,
+            typer.Option(
+                "--proxied/--no-proxied",
+                help="Explicitly manage Cloudflare proxying for this entry.",
+            ),
+        ] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
     ) -> None:
         """Add a dynamic local-host entry."""
 
+        parsed_ttl = common.parse_ttl_option(ttl)
         try:
             if common.enforce_root_privileges(
                 ctx,
@@ -293,7 +321,7 @@ def register(app: typer.Typer) -> None:
                     fqdn=fqdn,
                     family=family.value,
                     selection_policy=selection_policy,
-                    ttl=ttl,
+                    ttl=parsed_ttl,
                     proxied=proxied,
                     description=description,
                 )
@@ -311,12 +339,19 @@ def register(app: typer.Typer) -> None:
         sudo: bool = common.SUDO_OPTION,
         static_ipv4: Annotated[str | None, typer.Option("--ipv4")] = None,
         static_ipv6: Annotated[str | None, typer.Option("--ipv6")] = None,
-        ttl: Annotated[int | None, typer.Option("--ttl")] = None,
-        proxied: Annotated[bool | None, typer.Option("--proxied")] = None,
+        ttl: Annotated[str | None, typer.Option("--ttl")] = None,
+        proxied: Annotated[
+            bool | None,
+            typer.Option(
+                "--proxied/--no-proxied",
+                help="Explicitly manage Cloudflare proxying for this entry.",
+            ),
+        ] = None,
         description: Annotated[str | None, typer.Option("--description")] = None,
     ) -> None:
         """Add a static IP entry."""
 
+        parsed_ttl = common.parse_ttl_option(ttl)
         try:
             if common.enforce_root_privileges(
                 ctx,
@@ -331,7 +366,7 @@ def register(app: typer.Typer) -> None:
                     source_kind="static",
                     fqdn=fqdn,
                     family=family.value,
-                    ttl=ttl,
+                    ttl=parsed_ttl,
                     proxied=proxied,
                     description=description,
                     static_ipv4=static_ipv4,

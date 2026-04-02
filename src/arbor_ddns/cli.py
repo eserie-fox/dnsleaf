@@ -18,6 +18,7 @@ app = typer.Typer(
         "Manage workspace-driven Cloudflare DDNS for PVE guests, "
         "the local host, and static IP targets."
     ),
+    no_args_is_help=True,
     invoke_without_command=True,
 )
 VERSION_OPTION = typer.Option(
@@ -38,9 +39,6 @@ def callback(
     ctx.ensure_object(dict)
     if version:
         typer.echo(__version__)
-        raise typer.Exit()
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
         raise typer.Exit()
 
     outside_workspace_config = OutsideWorkspaceConfig.from_defaults()

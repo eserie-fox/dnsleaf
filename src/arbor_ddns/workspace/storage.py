@@ -145,9 +145,11 @@ class WorkspaceStorage:
 
         workspace_config = WorkspaceConfig.scaffold_defaults(paths.root.name)
         entries_file = EntriesFile.scaffold_defaults()
+        workspace_payload = workspace_config.model_dump(mode="json", exclude_none=True)
+        workspace_payload["default_proxied"] = workspace_config.default_proxied
         dump_yaml_data(
             paths.workspace_file,
-            workspace_config.model_dump(mode="json", exclude_none=True),
+            workspace_payload,
         )
         dump_yaml_data(paths.entries_file, entries_file.model_dump(mode="json", exclude_none=True))
         atomic_write_text(

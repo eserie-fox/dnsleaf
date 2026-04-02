@@ -7,6 +7,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+AUTO_TTL = 1
+TTLSetting = int | Literal["auto"]
+
 
 class DNSRecord(BaseModel):
     """A provider-side DNS record."""
@@ -53,7 +56,7 @@ class DesiredRecord(BaseModel):
     record_type: str
     value: str
     ttl: int = Field(ge=1)
-    proxied: bool = False
+    proxied: bool | None = None
 
     @field_validator("record_type")
     @classmethod
@@ -132,3 +135,45 @@ def _normalize_record_value(record_type: str, value: str) -> str:
     if record_type == "AAAA" and not isinstance(parsed, IPv6Address):
         raise ValueError("AAAA records require an IPv6 value")
     return str(parsed)
+
+
+def normalize_ttl_setting(value: object) -> TTLSetting:
+    """Normalize a config or CLI TTL value to an int or `auto`."""
+
+    if isinstance(value, bool):
+        raise ValueError("ttl must be a positive integer or 'auto'")
+    if isinstance(value, int):
+        if value < 1:
+            raise ValueError("ttl must be a positive integer or 'auto'")
+        return value
+    if isinstance(value, str):
+        stripped = value.strip().lower()
+        if stripped == "auto":
+            return "auto"
+        if not stripped:
+            raise ValueError("ttl must be a positive integer or 'auto'")
+        try:
+            parsed = int(stripped)
+        except ValueError as exc:
+            raise ValueError("ttl must be a positive integer or 'auto'") from exc
+        if parsed < 1:
+            raise ValueError("ttl must be a positive integer or 'auto'")
+        return parsed
+    raise ValueError("ttl must be a positive integer or 'auto'")
+
+
+def resolve_ttl_setting(value: TTLSetting | int) -> int:
+    """Return the provider-facing integer TTL."""
+
+    normalized = normalize_ttl_setting(value)
+    if normalized == "auto":
+        return AUTO_TTL
+    return normalized
+
+
+def cloudflare_effective_ttl(ttl: TTLSetting | int, proxied: bool | None) -> int:
+    """Return the effective Cloudflare TTL for the intended proxied state."""
+
+    if proxied is True:
+        return AUTO_TTL
+    return resolve_ttl_setting(ttl)

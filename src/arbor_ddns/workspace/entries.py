@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from arbor_ddns.dns.models import TTLSetting
 from arbor_ddns.models import EntryAddressFamily, EntrySourceKind
 from arbor_ddns.workspace.models import EntriesFile, EntryMutationResult, WorkspaceEntry
 from arbor_ddns.workspace.storage import WorkspaceLoadError, WorkspaceStorage, dump_yaml_data
@@ -30,7 +31,7 @@ class EntryService:
         family: str,
         source_id: int | None = None,
         selection_policy: str | None = None,
-        ttl: int | None = None,
+        ttl: TTLSetting | None = None,
         proxied: bool | None = None,
         description: str | None = None,
         static_ipv4: str | None = None,
@@ -80,8 +81,9 @@ class EntryService:
         family: str | None = None,
         selection_policy: str | None = None,
         enabled: bool | None = None,
-        ttl: int | None = None,
+        ttl: TTLSetting | None = None,
         proxied: bool | None = None,
+        inherit_proxied: bool = False,
         source_id: int | None = None,
         description: str | None = None,
         static_ipv4: str | None = None,
@@ -104,7 +106,9 @@ class EntryService:
             patch["enabled"] = enabled
         if ttl is not None:
             patch["ttl"] = ttl
-        if proxied is not None:
+        if inherit_proxied:
+            patch["proxied"] = None
+        elif proxied is not None:
             patch["proxied"] = proxied
         if source_id is not None:
             patch["source_id"] = source_id

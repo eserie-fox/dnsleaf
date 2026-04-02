@@ -87,3 +87,81 @@ def test_planner_noop_when_already_in_sync() -> None:
     plan = plan_dns_changes(current_records=current, desired_record=desired)
 
     assert [change.action for change in plan.changes] == ["noop"]
+
+
+def test_planner_noops_when_proxy_is_unmanaged_and_cloudflare_forces_auto_ttl() -> None:
+    desired = DesiredRecord(
+        provider="cloudflare",
+        fqdn="host.example.com",
+        record_type="AAAA",
+        value="2408:8266:5003:506a::3d6",
+        ttl=300,
+        proxied=None,
+    )
+    current = [
+        DNSRecord(
+            provider="cloudflare",
+            fqdn="host.example.com",
+            record_type="AAAA",
+            value="2408:8266:5003:506a::3d6",
+            ttl=1,
+            record_id="rec-1",
+            proxied=True,
+        )
+    ]
+
+    plan = plan_dns_changes(current_records=current, desired_record=desired)
+
+    assert [change.action for change in plan.changes] == ["noop"]
+
+
+def test_planner_updates_when_proxied_is_explicitly_enabled() -> None:
+    desired = DesiredRecord(
+        provider="cloudflare",
+        fqdn="host.example.com",
+        record_type="AAAA",
+        value="2408:8266:5003:506a::3d6",
+        ttl=1,
+        proxied=True,
+    )
+    current = [
+        DNSRecord(
+            provider="cloudflare",
+            fqdn="host.example.com",
+            record_type="AAAA",
+            value="2408:8266:5003:506a::3d6",
+            ttl=120,
+            record_id="rec-1",
+            proxied=False,
+        )
+    ]
+
+    plan = plan_dns_changes(current_records=current, desired_record=desired)
+
+    assert [change.action for change in plan.changes] == ["update"]
+
+
+def test_planner_updates_when_proxied_is_explicitly_disabled() -> None:
+    desired = DesiredRecord(
+        provider="cloudflare",
+        fqdn="host.example.com",
+        record_type="AAAA",
+        value="2408:8266:5003:506a::3d6",
+        ttl=300,
+        proxied=False,
+    )
+    current = [
+        DNSRecord(
+            provider="cloudflare",
+            fqdn="host.example.com",
+            record_type="AAAA",
+            value="2408:8266:5003:506a::3d6",
+            ttl=1,
+            record_id="rec-1",
+            proxied=True,
+        )
+    ]
+
+    plan = plan_dns_changes(current_records=current, desired_record=desired)
+
+    assert [change.action for change in plan.changes] == ["update"]

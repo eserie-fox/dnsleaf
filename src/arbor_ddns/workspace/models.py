@@ -15,6 +15,12 @@ from arbor_ddns.config.scaffold import (
 )
 from arbor_ddns.config.shared import DiscoveryCommandPaths
 from arbor_ddns.dns.cloudflare import CloudflareProviderConfig
+from arbor_ddns.dns.models import (
+    TTLSetting,
+    cloudflare_effective_ttl,
+    normalize_ttl_setting,
+    resolve_ttl_setting,
+)
 from arbor_ddns.logging.config import ArborDDNSLoggingConfig, ResolvedArborDDNSLoggingConfig
 from arbor_ddns.models import EntryAddressFamily, EntrySourceKind, IPAddressFamily, TargetRef
 from arbor_ddns.util.ip import normalize_ip
@@ -125,8 +131,8 @@ class WorkspaceConfig(BaseModel):
     zone_name: str
     zone_id: str | None = None
     api_token_file: str
-    default_ttl: int = Field(ge=1)
-    default_proxied: bool
+    default_ttl: TTLSetting
+    default_proxied: bool | None
     paths: WorkspaceRuntimePaths
     systemd: WorkspaceSystemdConfig
     apply: WorkspaceApplyConfig
@@ -168,6 +174,11 @@ class WorkspaceConfig(BaseModel):
         stripped = value.strip()
         return stripped or None
 
+    @field_validator("default_ttl", mode="before")
+    @classmethod
+    def _normalize_default_ttl(cls, value: object) -> TTLSetting:
+        return normalize_ttl_setting(value)
+
     def resolved_api_token_file(self, workspace_root: Path) -> Path:
         """Resolve the token file path relative to the workspace root."""
 
@@ -206,7 +217,7 @@ class WorkspaceConfig(BaseModel):
             zone_name=self.zone_name,
             zone_id=self.zone_id,
             api_token_file=str(self.resolved_api_token_file(workspace_root)),
-            default_ttl=self.default_ttl,
+            default_ttl=resolve_ttl_setting(self.default_ttl),
             default_proxied=self.default_proxied,
             paths=self.paths.resolve(workspace_root),
             systemd=ResolvedWorkspaceSystemdConfig(
@@ -233,7 +244,7 @@ class WorkspaceEntry(BaseModel):
     enabled: bool
     source_id: int | None = Field(default=None, ge=1)
     selection_policy: str | None = None
-    ttl: int | None = Field(default=None, ge=1)
+    ttl: TTLSetting | None = None
     proxied: bool | None = None
     description: str | None = None
     static_ipv4: str | None = None
@@ -259,6 +270,13 @@ class WorkspaceEntry(BaseModel):
             return None
         stripped = value.strip()
         return stripped or None
+
+    @field_validator("ttl", mode="before")
+    @classmethod
+    def _normalize_ttl(cls, value: object) -> TTLSetting | None:
+        if value is None:
+            return None
+        return normalize_ttl_setting(value)
 
     @field_validator("description")
     @classmethod
@@ -323,9 +341,11 @@ class WorkspaceEntry(BaseModel):
     def effective_ttl(self, default_ttl: int) -> int:
         """Return the entry-specific TTL, or the workspace default."""
 
-        return self.ttl if self.ttl is not None else default_ttl
+        if self.ttl is None:
+            return default_ttl
+        return resolve_ttl_setting(self.ttl)
 
-    def effective_proxied(self, default_proxied: bool) -> bool:
+    def effective_proxied(self, default_proxied: bool | None) -> bool | None:
         """Return the entry-specific proxied flag, or the workspace default."""
 
         return self.proxied if self.proxied is not None else default_proxied
@@ -442,6 +462,7 @@ class ResolvedWorkspaceRuntimePaths(BaseModel):
 
         return Path(self.systemd_unit_dir)
 
+
 class ResolvedWorkspace(BaseModel):
     """Runtime-resolved workspace config."""
 
@@ -454,7 +475,7 @@ class ResolvedWorkspace(BaseModel):
     zone_id: str | None
     api_token_file: str
     default_ttl: int
-    default_proxied: bool
+    default_proxied: bool | None
     paths: ResolvedWorkspaceRuntimePaths
     systemd: ResolvedWorkspaceSystemdConfig
     apply: WorkspaceApplyConfig
@@ -485,7 +506,7 @@ class DesiredRecordSpec(BaseModel):
     family: IPAddressFamily
     record_type: str
     ttl: int
-    proxied: bool
+    proxied: bool | None = None
     source_kind: EntrySourceKind
     source_id: int | None
     selection_policy: str | None
@@ -503,6 +524,8 @@ class DesiredRecordSpec(BaseModel):
     ) -> list[DesiredRecordSpec]:
         """Build renderable desired-record specs for one entry."""
 
+        proxied = entry.effective_proxied(workspace.default_proxied)
+        ttl = cloudflare_effective_ttl(entry.effective_ttl(workspace.default_ttl), proxied)
         return [
             cls(
                 entry_name=entry.name,
@@ -510,8 +533,8 @@ class DesiredRecordSpec(BaseModel):
                 fqdn=entry.fqdn,
                 family=family,
                 record_type=family.record_type,
-                ttl=entry.effective_ttl(workspace.default_ttl),
-                proxied=entry.effective_proxied(workspace.default_proxied),
+                ttl=ttl,
+                proxied=proxied,
                 source_kind=entry.source_kind,
                 source_id=entry.source_id,
                 selection_policy=entry.selection_policy,
@@ -522,6 +545,13 @@ class DesiredRecordSpec(BaseModel):
             )
             for family in entry.concrete_families()
         ]
+
+    def render_mapping(self) -> dict[str, object]:
+        """Return the JSON mapping used for rendered desired-record output."""
+
+        payload = self.model_dump(mode="json", exclude_none=True)
+        payload["proxied"] = self.proxied
+        return payload
 
 
 class ValidationReport(BaseModel):

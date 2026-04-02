@@ -5,8 +5,8 @@
   "zone_name": "example.com",
   "zone_id": null,
   "api_token_file": "secrets/cloudflare_api_token.txt",
-  "default_ttl": 120,
-  "default_proxied": false,
+  "default_ttl": "auto",
+  "default_proxied": null,
   "paths": {
     "pct_bin": "pct",
     "qm_bin": "qm",

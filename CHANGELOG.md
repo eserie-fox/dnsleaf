@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 - 2026-04-02
+
+`arbor-ddns` 1.0.3 is ready for internal patch-release use on a local machine.
+
+- fixed `entry update` so operators can explicitly clear an entry-level `proxied` override and return to inheriting the workspace default
+- aligned `entry` proxied flags around explicit `--proxied/--no-proxied` behavior instead of leaving update as a one-way flag
+- updated tests, operator docs, release notes, and version metadata for the 1.0.3 release-prep pass
+
 ## 1.0.2 - 2026-04-01
 
 `arbor-ddns` 1.0.2 is ready for internal patch-release use on a local machine.

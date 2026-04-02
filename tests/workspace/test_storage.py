@@ -27,6 +27,8 @@ def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
 
     workspace_payload = yaml.safe_load((workspace / "workspace.yaml").read_text(encoding="utf-8"))
     assert workspace_payload["config_version"] == 3
+    assert workspace_payload["default_ttl"] == "auto"
+    assert workspace_payload["default_proxied"] is None
     assert workspace_payload["paths"]["systemctl_bin"] == "systemctl"
 
 
@@ -34,6 +36,8 @@ def test_workspace_scaffold_defaults_build_typed_model() -> None:
     workspace_config = WorkspaceConfig.scaffold_defaults("lab")
 
     assert workspace_config.workspace_name == "lab"
+    assert workspace_config.default_ttl == "auto"
+    assert workspace_config.default_proxied is None
     assert workspace_config.paths.pct_bin == "pct"
     assert workspace_config.paths.systemctl_bin == "systemctl"
     assert workspace_config.arbor_ddns_logging.file_path == "runtime/logs/arbor-ddns.log"
@@ -166,5 +170,6 @@ def test_render_generates_effective_workspace_and_systemd_artifacts(workspace_di
     assert len(desired["records"]) == 2
     assert {record["record_type"] for record in desired["records"]} == {"A", "AAAA"}
     assert desired["records"][0]["entry_name"] == "web"
+    assert all(record["proxied"] is None for record in desired["records"])
     assert "ExecStart=" in service_unit
     assert "OnUnitActiveSec=" in timer_unit

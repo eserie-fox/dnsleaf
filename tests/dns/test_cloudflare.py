@@ -196,6 +196,67 @@ def test_provider_builds_create_request(tmp_path: Path) -> None:
     ]
 
 
+def test_provider_create_omits_unmanaged_proxied_and_sends_auto_ttl(tmp_path: Path) -> None:
+    post_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/client/v4/zones":
+            return _response_json(
+                {"success": True, "result": [{"id": "zone-123", "name": "example.com"}]}
+            )
+        if request.method == "GET":
+            return _response_json({"success": True, "result": []})
+        if request.method == "POST":
+            post_payloads.append(json.loads(request.content.decode("utf-8")))
+            return _response_json(
+                {
+                    "success": True,
+                    "result": {
+                        "id": "rec-1",
+                        "type": "AAAA",
+                        "name": "host.example.com",
+                        "content": "2408:8266:5003:506a::3d6",
+                        "ttl": 1,
+                        "proxied": False,
+                    },
+                }
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    provider = CloudflareDNSProvider(
+        _config(tmp_path),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    created = provider.apply_change(
+        PlannedChange(
+            action="create",
+            provider="cloudflare",
+            fqdn="host.example.com",
+            record_type="AAAA",
+            desired=DesiredRecord(
+                provider="cloudflare",
+                fqdn="host.example.com",
+                record_type="AAAA",
+                value="2408:8266:5003:506a::3d6",
+                ttl=1,
+                proxied=None,
+            ),
+            reason="test create unmanaged proxied",
+        )
+    )
+
+    assert created is not None
+    assert post_payloads == [
+        {
+            "type": "AAAA",
+            "name": "host.example.com",
+            "content": "2408:8266:5003:506a::3d6",
+            "ttl": 1,
+        }
+    ]
+
+
 def test_provider_builds_update_request(tmp_path: Path) -> None:
     patch_payloads: list[dict[str, object]] = []
 
@@ -251,6 +312,122 @@ def test_provider_builds_update_request(tmp_path: Path) -> None:
 
     assert updated is not None
     assert patch_payloads == [{"content": "2408:8266:5003:506a::3d6", "ttl": 120}]
+
+
+def test_provider_update_omits_unmanaged_proxied_and_ignores_forced_auto_ttl(
+    tmp_path: Path,
+) -> None:
+    patch_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            patch_payloads.append(json.loads(request.content.decode("utf-8")))
+            return _response_json(
+                {
+                    "success": True,
+                    "result": {
+                        "id": "rec-1",
+                        "type": "AAAA",
+                        "name": "host.example.com",
+                        "content": "2408:8266:5003:506a::3d6",
+                        "ttl": 1,
+                        "proxied": True,
+                    },
+                }
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    provider = CloudflareDNSProvider(
+        _config(tmp_path, zone_id="zone-123", zone_name=None),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    updated = provider.apply_change(
+        PlannedChange(
+            action="update",
+            provider="cloudflare",
+            fqdn="host.example.com",
+            record_type="AAAA",
+            current=DNSRecord(
+                provider="cloudflare",
+                fqdn="host.example.com",
+                record_type="AAAA",
+                value="2408:8266:5003:506a::111",
+                ttl=1,
+                record_id="rec-1",
+                proxied=True,
+            ),
+            desired=DesiredRecord(
+                provider="cloudflare",
+                fqdn="host.example.com",
+                record_type="AAAA",
+                value="2408:8266:5003:506a::3d6",
+                ttl=300,
+                proxied=None,
+            ),
+            reason="test update unmanaged proxied",
+        )
+    )
+
+    assert updated is not None
+    assert patch_payloads == [{"content": "2408:8266:5003:506a::3d6"}]
+
+
+def test_provider_update_explicit_proxied_true_uses_auto_ttl(tmp_path: Path) -> None:
+    patch_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            patch_payloads.append(json.loads(request.content.decode("utf-8")))
+            return _response_json(
+                {
+                    "success": True,
+                    "result": {
+                        "id": "rec-1",
+                        "type": "A",
+                        "name": "host.example.com",
+                        "content": "203.0.113.7",
+                        "ttl": 1,
+                        "proxied": True,
+                    },
+                }
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    provider = CloudflareDNSProvider(
+        _config(tmp_path, zone_id="zone-123", zone_name=None),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    updated = provider.apply_change(
+        PlannedChange(
+            action="update",
+            provider="cloudflare",
+            fqdn="host.example.com",
+            record_type="A",
+            current=DNSRecord(
+                provider="cloudflare",
+                fqdn="host.example.com",
+                record_type="A",
+                value="203.0.113.7",
+                ttl=120,
+                record_id="rec-1",
+                proxied=False,
+            ),
+            desired=DesiredRecord(
+                provider="cloudflare",
+                fqdn="host.example.com",
+                record_type="A",
+                value="203.0.113.7",
+                ttl=1,
+                proxied=True,
+            ),
+            reason="test explicit proxied true",
+        )
+    )
+
+    assert updated is not None
+    assert patch_payloads == [{"ttl": 1, "proxied": True}]
 
 
 def test_provider_builds_delete_request(tmp_path: Path) -> None:

@@ -32,9 +32,7 @@ class WorkspaceRenderer:
             loaded.paths.desired_records_file,
             {
                 "workspace_name": loaded.resolved_workspace.workspace_name,
-                "records": [
-                    record.model_dump(mode="json", exclude_none=True) for record in desired_records
-                ],
+                "records": [record.render_mapping() for record in desired_records],
             },
         )
 

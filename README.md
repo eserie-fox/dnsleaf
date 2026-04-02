@@ -47,6 +47,8 @@ printf '%s\n' 'YOUR_TOKEN' > ./workspaces/example-zone/secrets/cloudflare_api_to
 - optional `paths` overrides if this workspace should use non-default `pct`, `qm`, `sh`, `systemctl`, or a non-default systemd unit directory
 - optional `arbor_ddns_logging` overrides if you want a different workspace log path, level, stream, or retention
 
+New workspaces default to `default_proxied: null`, so arbor-ddns preserves Cloudflare-side proxy toggles unless an entry explicitly overrides `proxied`.
+
 4. Add entries.
 
 ```bash
@@ -77,6 +79,12 @@ arbor-ddns entry add static \
   --family both \
   --ipv4 93.184.216.34 \
   --ipv6 2408:8266:5003:506a::88
+```
+
+If you later want to clear an entry-level proxy override and go back to inheriting the workspace default:
+
+```bash
+arbor-ddns entry update web --workspace ./workspaces/example-zone --inherit-proxied
 ```
 
 You can also change into the workspace and omit `--workspace` on all workspace-aware commands:
@@ -215,11 +223,11 @@ Local wheel and sdist build flow:
 
 ```bash
 python -m build
-pip install dist/arbor_ddns-1.0.2-py3-none-any.whl
+pip install dist/arbor_ddns-1.0.3-py3-none-any.whl
 arbor-ddns --version
 ```
 
-For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.2 release notes](docs/release-notes/1.0.2.md).
+For the full internal release checklist, see [docs/release.md](docs/release.md) and [1.0.3 release notes](docs/release-notes/1.0.3.md).
 
 ## Documentation
 
@@ -233,4 +241,4 @@ For the full internal release checklist, see [docs/release.md](docs/release.md) 
 - [systemd Integration](docs/systemd_integration.md)
 - [Development Constraints](docs/development_constraints.md)
 - [Internal Release Workflow](docs/release.md)
-- [Release Notes 1.0.2](docs/release-notes/1.0.2.md)
+- [Release Notes 1.0.3](docs/release-notes/1.0.3.md)

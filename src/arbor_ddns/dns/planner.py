@@ -5,6 +5,26 @@ from __future__ import annotations
 from arbor_ddns.dns.models import DesiredRecord, DNSRecord, PlannedChange, SyncPlan
 
 
+def _ttl_matches(current: DNSRecord, desired: DesiredRecord) -> bool:
+    if desired.proxied is None and current.proxied is True:
+        return True
+    return current.ttl == desired.ttl
+
+
+def _proxied_matches(current: DNSRecord, desired: DesiredRecord) -> bool:
+    if desired.proxied is None:
+        return True
+    return current.proxied == desired.proxied
+
+
+def _record_matches(current: DNSRecord, desired: DesiredRecord) -> bool:
+    return (
+        current.value == desired.value
+        and _ttl_matches(current, desired)
+        and _proxied_matches(current, desired)
+    )
+
+
 def plan_dns_changes(
     *,
     current_records: list[DNSRecord],
@@ -68,9 +88,7 @@ def plan_dns_changes(
     exact_matches = [
         record
         for record in current_records
-        if record.value == desired_record.value
-        and record.ttl == desired_record.ttl
-        and record.proxied == desired_record.proxied
+        if _record_matches(record, desired_record)
     ]
     if exact_matches and len(current_records) == 1:
         return SyncPlan(

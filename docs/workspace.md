@@ -52,6 +52,17 @@ Contains workspace-level settings:
 
 `config_version` is currently `3`.
 
+`default_ttl` accepts either a positive integer or `auto`.
+
+- `auto` maps to Cloudflare automatic TTL (`1`)
+- the scaffold now defaults to `default_ttl: auto`
+
+`default_proxied` accepts `true`, `false`, or `null`.
+
+- `true` and `false` keep proxy state explicitly managed
+- `null` means proxy state is unmanaged and Cloudflare-side proxy status is preserved on update
+- the scaffold now defaults to `default_proxied: null`
+
 ### `paths`
 
 Contains workspace-owned execution paths:
@@ -111,6 +122,18 @@ Each entry describes:
 - enable/disable state
 - optional ttl and proxied overrides
 - optional static IP values for static entries
+
+If an entry omits `proxied`, it inherits `workspace.yaml.default_proxied`.
+
+- if the effective value is `true` or `false`, arbor-ddns manages proxy state
+- if the effective value is `null`, arbor-ddns leaves Cloudflare proxy state unchanged
+- use `arbor-ddns entry update <name> --inherit-proxied` to clear an existing entry-level override and return to this inherited behavior
+
+If an entry omits `ttl`, it inherits `workspace.yaml.default_ttl`.
+
+- TTL values may be a positive integer or `auto`
+- rendered/provider-facing TTL is always an integer
+- proxied records use Cloudflare automatic TTL, so an explicit proxied end state resolves to TTL `1`
 
 ## Command semantics
 
