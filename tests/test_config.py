@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from arbor_ddns.config import OutsideWorkspaceConfig, deep_merge
+from arbor_ddns.config.merge import deep_merge
+from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
 
 
 def test_from_defaults_loads_packaged_outside_workspace_config() -> None:

@@ -4,6 +4,9 @@ This repository intentionally stays narrow and predictable.
 
 ## Structural constraints
 
+- All `__init__.py` files stay thin package markers.
+- Every `__init__.py` must set `__all__: list[str] = []`.
+- Package-level re-exports are not allowed; imports must target the defining module directly.
 - The root CLI is only a command entry surface.
 - `sync/runner.py` stays thin and orchestration-focused.
 - Discovery backends only return candidate addresses.

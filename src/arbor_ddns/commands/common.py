@@ -19,9 +19,9 @@ from arbor_ddns.commands._privilege import (
     ensure_root_privileges,
     format_unsupported_sudo_reexec_message,
 )
-from arbor_ddns.config import OutsideWorkspaceConfig
+from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
 from arbor_ddns.dns.models import ProviderVerification, TTLSetting, normalize_ttl_setting
-from arbor_ddns.logging import workspace_logging_context
+from arbor_ddns.logging.runtime import workspace_logging_context
 from arbor_ddns.models import EntryAddressFamily, EntrySourceKind
 from arbor_ddns.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
 from arbor_ddns.workspace.entries import EntryService

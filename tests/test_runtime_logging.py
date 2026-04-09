@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from arbor_ddns.logging import (
+import arbor_ddns.logging.runtime as logging_runtime
+from arbor_ddns.logging.config import absolute_path_without_symlink_resolution
+from arbor_ddns.logging.runtime import (
     DailySymlinkFileHandler,
     ResolvedLoggingConfig,
     apply_logging_config,
@@ -16,10 +18,6 @@ from arbor_ddns.logging import (
     load_workspace_logging_config,
     workspace_logging_context,
 )
-from arbor_ddns.logging import (
-    runtime as logging_runtime,
-)
-from arbor_ddns.logging.config import absolute_path_without_symlink_resolution
 from arbor_ddns.workspace.service import WorkspaceService
 from arbor_ddns.workspace.storage import WorkspaceLoadError
 

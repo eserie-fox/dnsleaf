@@ -3,10 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
-
 from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider
 
-from arbor_ddns.config import OutsideWorkspaceConfig
+from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
 from arbor_ddns.discovery.local_ip import LocalIPDiscoveryBackend
 from arbor_ddns.discovery.models import AddressCandidate
 from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend

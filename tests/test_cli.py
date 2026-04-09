@@ -5,14 +5,15 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from arbor_ddns import __version__, cli
+from arbor_ddns import cli
 from arbor_ddns.commands import common
 from arbor_ddns.commands._privilege import PermissionOperationError
-from arbor_ddns.config import OutsideWorkspaceConfig
+from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
 from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult, SelectionResult
 from arbor_ddns.dns.models import ProviderVerification
 from arbor_ddns.models import EntrySourceKind, IPAddressFamily, SelectedAddress, TargetRef
 from arbor_ddns.sync.runner import RecordSyncOutcome, WorkspaceRunReport
+from arbor_ddns.version import __version__
 from arbor_ddns.workspace.models import (
     DoctorCheck,
     DoctorReport,

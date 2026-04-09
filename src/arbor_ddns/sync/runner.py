@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from arbor_ddns.config import OutsideWorkspaceConfig
+from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
 from arbor_ddns.discovery.base import DiscoveryBackend
 from arbor_ddns.discovery.local_ip import LocalIPDiscoveryBackend
 from arbor_ddns.discovery.models import DiscoveryResult, SelectionResult

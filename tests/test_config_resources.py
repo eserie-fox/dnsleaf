@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from arbor_ddns.config import (
+from arbor_ddns.config.resources import read_json_mapping, read_text
+from arbor_ddns.config.scaffold import (
     load_entries_scaffold_defaults,
     load_scaffold_layout,
     load_scaffold_secrets_readme,
     load_workspace_scaffold_defaults,
-    read_json_mapping,
-    read_text,
 )
 
 

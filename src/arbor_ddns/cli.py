@@ -6,11 +6,11 @@ import logging
 
 import typer
 
-from arbor_ddns import __version__
 from arbor_ddns.commands import discovery, entry, provider, workspace
 from arbor_ddns.commands.common import OUTSIDE_WORKSPACE_CONFIG_CONTEXT_KEY
-from arbor_ddns.config import OutsideWorkspaceConfig
-from arbor_ddns.logging import configure_default_logging
+from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
+from arbor_ddns.logging.runtime import configure_default_logging
+from arbor_ddns.version import __version__
 
 app = typer.Typer(
     add_completion=False,

@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from arbor_ddns.config import load_scaffold_layout, load_scaffold_secrets_readme
+from arbor_ddns.config.scaffold import load_scaffold_layout, load_scaffold_secrets_readme
 from arbor_ddns.workspace.models import (
     EntriesFile,
     ManagedRecordFile,

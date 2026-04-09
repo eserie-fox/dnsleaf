@@ -6,7 +6,7 @@ from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider, FakeSystemdManage
 
 from arbor_ddns.discovery.models import AddressCandidate
 from arbor_ddns.dns.models import DNSRecord
-from arbor_ddns.logging import workspace_logging_context
+from arbor_ddns.logging.runtime import workspace_logging_context
 from arbor_ddns.models import IPAddressFamily, TargetKind
 from arbor_ddns.sync.runner import SyncRunner
 from arbor_ddns.workspace.entries import EntryService

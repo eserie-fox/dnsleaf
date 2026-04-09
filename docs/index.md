@@ -2,6 +2,8 @@
 
 `arbor-ddns` manages one workspace per DNS zone. The workspace is the user-facing source of truth, and the CLI follows the `init -> validate -> render -> apply -> status` workflow, with `uninstall` for local cleanup and a stable `runtime/logs/arbor-ddns.log` symlink for workspace-local logs.
 
+Contributor-facing package-surface rules, including thin `__init__.py` exports, are documented in [Development Constraints](development_constraints.md).
+
 The current implementation supports:
 
 - dynamic `A`, `AAAA`, and dual-stack entries from PVE guests or the local host
