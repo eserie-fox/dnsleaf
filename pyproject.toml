@@ -1,16 +1,27 @@
 [build-system]
-requires = ["hatchling>=1.27.0"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "arbor-ddns"
+name = "dnsleaf"
 dynamic = ["version"]
 description = "Lightweight workspace-driven Cloudflare DDNS for dynamic and static IP targets."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
-authors = [
-  { name = "OpenAI Codex" },
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "eserie-fox" }]
+keywords = ["ddns", "cloudflare", "proxmox", "systemd", "ipv6"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: Name Service (DNS)",
+  "Topic :: System :: Systems Administration",
 ]
 dependencies = [
   "httpx>=0.27,<1.0",
@@ -26,27 +37,32 @@ dev = [
   "pytest>=8.3,<9.0",
   "pytest-cov>=5.0,<6.0",
   "ruff>=0.6,<1.0",
+  "types-PyYAML>=6.0,<7.0",
+  "twine>=6.0,<7.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/eserie-fox/dnsleaf"
+Issues = "https://github.com/eserie-fox/dnsleaf/issues"
+Changelog = "https://github.com/eserie-fox/dnsleaf/blob/main/CHANGELOG.md"
 
 [project.scripts]
-arbor-ddns = "arbor_ddns.cli:main"
+dnsleaf = "dnsleaf.cli:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/arbor_ddns"]
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = false
 
-[tool.hatch.build.targets.sdist]
-include = [
-  "/README.md",
-  "/docs/**/*.md",
-  "/src/arbor_ddns/**/*.py",
-  "/src/arbor_ddns/config_defaults/**/*",
-  "/tests/**/*.py",
-  "/pyproject.toml",
-  "/.python-version",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["dnsleaf", "dnsleaf.*"]
+namespaces = false
 
-[tool.hatch.version]
-path = "src/arbor_ddns/version.py"
+[tool.setuptools.package-data]
+dnsleaf = ["config_defaults/*.json", "templates/*.json", "templates/*.txt"]
+
+[tool.setuptools.dynamic]
+version = {attr = "dnsleaf.version.__version__"}
 
 [tool.ruff]
 target-version = "py311"
@@ -56,13 +72,21 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["dnsleaf", "tests"]
+
 [tool.pytest.ini_options]
-addopts = "--cov=arbor_ddns --cov-report=term-missing"
+addopts = "--cov=dnsleaf --cov-report=term-missing"
 testpaths = ["tests"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-packages = ["arbor_ddns"]
 pretty = true
 show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false

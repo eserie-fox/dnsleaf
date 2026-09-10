@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from arbor_ddns.discovery.base import DiscoveryBackend
-from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult
-from arbor_ddns.dns.base import DNSProvider
-from arbor_ddns.dns.models import DNSRecord, PlannedChange, ProviderVerification
-from arbor_ddns.models import IPAddressFamily, TargetRef
-from arbor_ddns.util.process import CommandResult
-from arbor_ddns.workspace.models import SystemdUnitStatus
-from arbor_ddns.workspace.storage import WorkspacePaths
+from dnsleaf.discovery.base import DiscoveryBackend
+from dnsleaf.discovery.models import AddressCandidate, DiscoveryResult
+from dnsleaf.dns.base import DNSProvider
+from dnsleaf.dns.models import DNSRecord, PlannedChange, ProviderVerification
+from dnsleaf.models import IPAddressFamily, TargetRef
+from dnsleaf.systemd import SystemdManager
+from dnsleaf.util.process import CommandResult
+from dnsleaf.workspace.models import ResolvedWorkspace, SystemdUnitStatus
+from dnsleaf.workspace.storage import WorkspacePaths
 
 
 class FakeDiscoveryBackend(DiscoveryBackend):
@@ -27,7 +28,7 @@ class FakeDiscoveryBackend(DiscoveryBackend):
             AddressCandidate(
                 family=IPAddressFamily.IPV6,
                 interface="eth0",
-                address="2408:8266:5003:506a::3d6",
+                address="2001:4860:abcd:1234::3d6",
                 prefix_length=128,
                 source=self.name,
             ),
@@ -82,9 +83,7 @@ class FakeDNSProvider(DNSProvider):
             assert change.current is not None
             assert change.desired is not None
             proxied = (
-                change.current.proxied
-                if change.desired.proxied is None
-                else change.desired.proxied
+                change.current.proxied if change.desired.proxied is None else change.desired.proxied
             )
             ttl = (
                 change.current.ttl
@@ -127,8 +126,9 @@ class FakeDNSProvider(DNSProvider):
         )
 
 
-class FakeSystemdManager:
+class FakeSystemdManager(SystemdManager):
     def __init__(self, unit_dir: Path) -> None:
+        self.calls: list[str] = []
         self.unit_dir = unit_dir
         self.installed_units: list[tuple[Path, Path]] = []
         self.daemon_reloaded = False
@@ -139,16 +139,18 @@ class FakeSystemdManager:
         self.disabled_timers: list[str] = []
         self.reset_failed_units: list[tuple[str, str]] = []
 
-    def render_service_unit(self, workspace) -> str:
+    def render_service_unit(self, workspace: ResolvedWorkspace) -> str:
         return (
             "[Service]\n"
-            f"ExecStart=arbor-ddns sync-once --workspace {workspace.workspace_root} --apply\n"
+            f"ExecStart=dnsleaf sync-once --workspace {workspace.workspace_root} --apply\n"
         )
 
-    def render_timer_unit(self, workspace) -> str:
+    def render_timer_unit(self, workspace: ResolvedWorkspace) -> str:
         return f"[Timer]\nUnit={workspace.systemd.service_name}.service\n"
 
-    def install_rendered_units(self, paths: WorkspacePaths, workspace) -> tuple[Path, Path]:
+    def install_rendered_units(
+        self, paths: WorkspacePaths, workspace: ResolvedWorkspace
+    ) -> tuple[Path, Path]:
         self.unit_dir.mkdir(parents=True, exist_ok=True)
         service_path = self.unit_dir / f"{workspace.systemd.service_name}.service"
         timer_path = self.unit_dir / f"{workspace.systemd.timer_name}.timer"
@@ -157,7 +159,7 @@ class FakeSystemdManager:
         self.installed_units.append((service_path, timer_path))
         return service_path, timer_path
 
-    def daemon_reload(self, workspace, *, check: bool = True) -> CommandResult:
+    def daemon_reload(self, workspace: ResolvedWorkspace, *, check: bool = True) -> CommandResult:
         _ = workspace
         self.daemon_reloaded = True
         return CommandResult(
@@ -167,15 +169,18 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def enable_restart_timer(self, workspace, timer_name: str) -> None:
+    def enable_restart_timer(self, workspace: ResolvedWorkspace, timer_name: str) -> None:
         _ = workspace
         self.enabled_timers.append(timer_name)
 
-    def start_service(self, workspace, service_name: str) -> None:
+    def start_service(self, workspace: ResolvedWorkspace, service_name: str) -> None:
         _ = workspace
         self.started_services.append(service_name)
 
-    def stop_service(self, workspace, service_name: str, *, check: bool = False) -> CommandResult:
+    def stop_service(
+        self, workspace: ResolvedWorkspace, service_name: str, *, check: bool = False
+    ) -> CommandResult:
+        self.calls.append("stop_service")
         _ = workspace
         self.stopped_services.append(service_name)
         return CommandResult(
@@ -185,7 +190,10 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def stop_timer(self, workspace, timer_name: str, *, check: bool = False) -> CommandResult:
+    def stop_timer(
+        self, workspace: ResolvedWorkspace, timer_name: str, *, check: bool = False
+    ) -> CommandResult:
+        self.calls.append("stop_timer")
         _ = workspace
         self.stopped_timers.append(timer_name)
         return CommandResult(
@@ -197,11 +205,12 @@ class FakeSystemdManager:
 
     def disable_timer(
         self,
-        workspace,
+        workspace: ResolvedWorkspace,
         timer_name: str,
         *,
         check: bool = False,
     ) -> CommandResult:
+        self.calls.append("disable_timer")
         _ = workspace
         self.disabled_timers.append(timer_name)
         return CommandResult(
@@ -213,7 +222,7 @@ class FakeSystemdManager:
 
     def reset_failed(
         self,
-        workspace,
+        workspace: ResolvedWorkspace,
         unit_name: str,
         unit_kind: str,
         *,
@@ -228,18 +237,24 @@ class FakeSystemdManager:
             stderr="",
         )
 
-    def installed_unit_path(self, workspace, unit_name: str, unit_kind: str) -> Path:
+    def installed_unit_path(
+        self, workspace: ResolvedWorkspace, unit_name: str, unit_kind: str
+    ) -> Path:
         _ = workspace
         return self.unit_dir / f"{unit_name}.{unit_kind}"
 
-    def remove_installed_unit(self, workspace, unit_name: str, unit_kind: str) -> Path | None:
+    def remove_installed_unit(
+        self, workspace: ResolvedWorkspace, unit_name: str, unit_kind: str
+    ) -> Path | None:
         path = self.installed_unit_path(workspace, unit_name, unit_kind)
         if not path.exists():
             return None
         path.unlink()
         return path
 
-    def status(self, workspace, unit_name: str, unit_kind: str) -> SystemdUnitStatus:
+    def status(
+        self, workspace: ResolvedWorkspace, unit_name: str, unit_kind: str
+    ) -> SystemdUnitStatus:
         _ = workspace
         return SystemdUnitStatus(
             unit_name=f"{unit_name}.{unit_kind}",
@@ -251,10 +266,10 @@ class FakeSystemdManager:
             fragment_path=str(self.unit_dir / f"{unit_name}.{unit_kind}"),
         )
 
-    def systemctl_available(self, workspace) -> bool:
+    def systemctl_available(self, workspace: ResolvedWorkspace) -> bool:
         _ = workspace
         return True
 
-    def unit_dir_writable(self, workspace) -> bool:
+    def unit_dir_writable(self, workspace: ResolvedWorkspace) -> bool:
         _ = workspace
         return True

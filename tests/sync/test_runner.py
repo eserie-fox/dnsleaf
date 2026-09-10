@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
-from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider
+import yaml
 
-from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
-from arbor_ddns.discovery.local_ip import LocalIPDiscoveryBackend
-from arbor_ddns.discovery.models import AddressCandidate
-from arbor_ddns.discovery.pve_lxc import PVELXCDiscoveryBackend
-from arbor_ddns.discovery.pve_qga import PVEQGADiscoveryBackend
-from arbor_ddns.dns.models import DNSRecord
-from arbor_ddns.models import IPAddressFamily, TargetKind
-from arbor_ddns.sync.runner import SyncRunner
-from arbor_ddns.workspace.models import ManagedRecordFile
-from arbor_ddns.workspace.storage import WorkspaceStorage
+from dnsleaf.config.outside_workspace import OutsideWorkspaceConfig
+from dnsleaf.discovery.local_ip import LocalIPDiscoveryBackend
+from dnsleaf.discovery.models import AddressCandidate
+from dnsleaf.discovery.pve_lxc import PVELXCDiscoveryBackend
+from dnsleaf.discovery.pve_qga import PVEQGADiscoveryBackend
+from dnsleaf.dns.models import DNSRecord
+from dnsleaf.models import IPAddressFamily, TargetKind
+from dnsleaf.sync.runner import SyncRunner
+from dnsleaf.workspace.models import ManagedRecordFile
+from dnsleaf.workspace.storage import WorkspaceStorage
+from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider
 
 
 def _prepare_loaded_workspace(tmp_path: Path, entries_yaml: str):
@@ -85,7 +85,7 @@ def test_runner_apply_calls_provider_for_static_both_entry(tmp_path: Path) -> No
             "    fqdn: edge.example.com\n"
             "    family: both\n"
             "    static_ipv4: 93.184.216.34\n"
-            "    static_ipv6: 2408:8266:5003:506a::88\n"
+            "    static_ipv6: 2001:4860:abcd:1234::88\n"
             "    enabled: true\n"
         ),
     )
@@ -132,14 +132,14 @@ def test_runner_handles_dynamic_both_with_one_family_ambiguous(tmp_path: Path) -
             AddressCandidate(
                 family=IPAddressFamily.IPV6,
                 interface="eth0",
-                address="2408:8266:5003:506a:e27f:4076:f737:e75a",
+                address="2001:4860:abcd:1234:e27f:4076:f737:e75a",
                 prefix_length=64,
                 source="fake_discovery",
             ),
             AddressCandidate(
                 family=IPAddressFamily.IPV6,
                 interface="eth0",
-                address="2408:8266:5003:506a:9d54:1c94:fbb1:b5ee",
+                address="2001:4860:abcd:1234:9d54:1c94:fbb1:b5ee",
                 prefix_length=64,
                 source="fake_discovery",
             ),
@@ -181,7 +181,7 @@ def test_runner_plans_prune_for_tracked_stale_record(tmp_path: Path) -> None:
         provider="cloudflare",
         fqdn="old.example.com",
         record_type="AAAA",
-        value="2408:8266:5003:506a::88",
+        value="2001:4860:abcd:1234::88",
         ttl=120,
         proxied=False,
         record_id="rec-stale",
@@ -197,7 +197,7 @@ def test_runner_plans_prune_for_tracked_stale_record(tmp_path: Path) -> None:
                     "fqdn": "old.example.com",
                     "record_type": "AAAA",
                     "record_id": "rec-stale",
-                    "value": "2408:8266:5003:506a::88",
+                    "value": "2001:4860:abcd:1234::88",
                     "ttl": 120,
                     "proxied": False,
                     "state": "stale",
@@ -224,7 +224,7 @@ def test_runner_uses_outside_workspace_paths_for_discovery_fallback() -> None:
                     "qm_bin": "/usr/sbin/qm",
                     "shell_bin": "/bin/bash",
                 },
-                "arbor_ddns_logging": {
+                "dnsleaf_logging": {
                     "level": "INFO",
                     "format": "%(message)s",
                     "file_path": None,
@@ -276,7 +276,7 @@ def test_runner_preserves_remote_proxy_state_when_proxy_is_unmanaged(tmp_path: P
         provider="cloudflare",
         fqdn="host.example.com",
         record_type="AAAA",
-        value="2408:8266:5003:506a::3d6",
+        value="2001:4860:abcd:1234::3d6",
         ttl=1,
         proxied=True,
         record_id="rec-1",
@@ -294,3 +294,68 @@ def test_runner_preserves_remote_proxy_state_when_proxy_is_unmanaged(tmp_path: P
     assert len(report.record_outcomes) == 1
     assert report.record_outcomes[0].plan is not None
     assert [change.action for change in report.record_outcomes[0].plan.changes] == ["noop"]
+
+
+def test_unavailable_family_preserves_existing_managed_record_during_prune(tmp_path: Path) -> None:
+    loaded, _ = _prepare_loaded_workspace(
+        tmp_path,
+        """
+config_version: 2
+entries:
+  - name: dual
+    source_kind: lxc
+    source_id: 101
+    fqdn: dual.example.com
+    family: both
+    selection_policy: default
+    enabled: true
+""",
+    )
+    existing = DNSRecord(
+        provider="cloudflare",
+        fqdn="dual.example.com",
+        record_type="AAAA",
+        value="2001:db8::10",
+        ttl=120,
+        record_id="managed-v6",
+    )
+    provider = FakeDNSProvider([existing])
+    backend = FakeDiscoveryBackend(
+        [
+            AddressCandidate(
+                family=IPAddressFamily.IPV4,
+                interface="eth0",
+                address="93.184.216.34",
+                prefix_length=32,
+                source="test",
+            )
+        ]
+    )
+    state = ManagedRecordFile.model_validate(
+        {
+            "records": [
+                {
+                    "entry_name": "dual",
+                    "fqdn": existing.fqdn,
+                    "record_type": "AAAA",
+                    "value": existing.value,
+                    "record_id": existing.record_id,
+                    "ttl": 120,
+                    "workspace_name": "lab",
+                    "state": "active",
+                    "first_managed_at": "2026-01-01T00:00:00Z",
+                    "last_seen_at": "2026-01-01T00:00:00Z",
+                    "proxied": None,
+                }
+            ]
+        }
+    )
+    runner = _build_runner(provider, discovery_backend=backend)
+    plan = runner.run(loaded, managed_state=state, apply=False, prune_managed=True)
+    assert plan.dry_run
+    assert provider.applied_actions == []
+    report = runner.run(loaded, managed_state=state, apply=True, prune_managed=True)
+    assert report.record_outcomes[1].status == "skipped"
+    assert report.prune_outcomes == []
+    assert provider.applied_actions == ["create"]
+    assert provider.list_records(existing.fqdn, "AAAA") == [existing]

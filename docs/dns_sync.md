@@ -20,9 +20,9 @@ Cloudflare TTL and proxy behavior:
 
 - API TTL `1` means automatic TTL
 - proxied records use Cloudflare automatic TTL
-- arbor-ddns therefore treats `auto` as TTL `1`
-- when the desired proxy state is explicitly `true`, arbor-ddns compares and applies the provider-effective TTL `1`
-- when the desired proxy state is unmanaged (`proxied: null`) and the current Cloudflare record is already proxied, arbor-ddns ignores the forced auto-TTL mismatch instead of churning the record
+- dnsleaf therefore treats `auto` as TTL `1`
+- when the desired proxy state is explicitly `true`, dnsleaf compares and applies the provider-effective TTL `1`
+- when the desired proxy state is unmanaged (`proxied: null`) and the current Cloudflare record is already proxied, dnsleaf ignores the forced auto-TTL mismatch instead of churning the record
 
 ## Planner responsibilities
 
@@ -47,7 +47,7 @@ When a workspace entry has `family=both`, the runner simply constructs two indep
 
 ## Verify flow
 
-`arbor-ddns provider verify --workspace <dir>` checks:
+`dnsleaf provider verify --workspace <dir>` checks:
 
 1. token file exists and is readable
 2. token is non-empty
@@ -90,3 +90,10 @@ When enabled, prune only targets records that:
 - still have a usable `record_id`
 
 Untracked zone records are never deleted by prune.
+
+## Ambiguous remote records
+
+When multiple remote records share the requested name and type, normal synchronization reports an
+error and preserves every record, including when one already matches the desired address.
+It does not pick a record arbitrarily or remove duplicates. Inspect these records manually.
+Deletion planning is used only by the managed-state prune path.

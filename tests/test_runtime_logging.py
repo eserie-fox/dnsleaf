@@ -6,11 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 
-import arbor_ddns.logging.runtime as logging_runtime
-from arbor_ddns.logging.config import absolute_path_without_symlink_resolution
-from arbor_ddns.logging.runtime import (
+import dnsleaf.logging.runtime as logging_runtime
+from dnsleaf.logging.config import absolute_path_without_symlink_resolution
+from dnsleaf.logging.runtime import (
     DailySymlinkFileHandler,
     ResolvedLoggingConfig,
     apply_logging_config,
@@ -18,8 +18,8 @@ from arbor_ddns.logging.runtime import (
     load_workspace_logging_config,
     workspace_logging_context,
 )
-from arbor_ddns.workspace.service import WorkspaceService
-from arbor_ddns.workspace.storage import WorkspaceLoadError
+from dnsleaf.workspace.service import WorkspaceService
+from dnsleaf.workspace.storage import WorkspaceLoadError
 
 
 @contextmanager
@@ -46,8 +46,8 @@ def _write_workspace_logging_override(
     stream: str = "none",
 ) -> None:
     payload = yaml.safe_load((workspace / "workspace.yaml").read_text(encoding="utf-8"))
-    payload["arbor_ddns_logging"]["file_path"] = file_path
-    payload["arbor_ddns_logging"]["stream"] = stream
+    payload["dnsleaf_logging"]["file_path"] = file_path
+    payload["dnsleaf_logging"]["stream"] = stream
     (workspace / "workspace.yaml").write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=False),
         encoding="utf-8",
@@ -60,14 +60,14 @@ def test_daily_symlink_handler_is_lazy_until_first_record(tmp_path: Path) -> Non
     def now() -> datetime:
         return current
 
-    handler = DailySymlinkFileHandler(tmp_path / "arbor-ddns.log", now_func=now)
+    handler = DailySymlinkFileHandler(tmp_path / "dnsleaf.log", now_func=now)
 
-    assert not (tmp_path / "arbor-ddns.log").exists()
+    assert not (tmp_path / "dnsleaf.log").exists()
     assert not any(tmp_path.iterdir())
 
     record = logging.makeLogRecord(
         {
-            "name": "arbor_ddns.test",
+            "name": "dnsleaf.test",
             "levelno": logging.INFO,
             "levelname": "INFO",
             "msg": "hello world",
@@ -76,8 +76,8 @@ def test_daily_symlink_handler_is_lazy_until_first_record(tmp_path: Path) -> Non
     handler.emit(record)
     handler.close()
 
-    symlink = tmp_path / "arbor-ddns.log"
-    daily_file = tmp_path / "arbor-ddns-2026-04-01.log"
+    symlink = tmp_path / "dnsleaf.log"
+    daily_file = tmp_path / "dnsleaf-2026-04-01.log"
     assert symlink.is_symlink()
     assert symlink.resolve() == daily_file.resolve()
     assert "hello world" in daily_file.read_text(encoding="utf-8")
@@ -89,20 +89,20 @@ def test_daily_symlink_handler_prunes_old_files_by_retention(tmp_path: Path) -> 
     def now() -> datetime:
         return current
 
-    old_file = tmp_path / "arbor-ddns-2026-03-29.log"
-    keep_file = tmp_path / "arbor-ddns-2026-03-31.log"
+    old_file = tmp_path / "dnsleaf-2026-03-29.log"
+    keep_file = tmp_path / "dnsleaf-2026-03-31.log"
     old_file.write_text("old", encoding="utf-8")
     keep_file.write_text("keep", encoding="utf-8")
 
     handler = DailySymlinkFileHandler(
-        tmp_path / "arbor-ddns.log",
+        tmp_path / "dnsleaf.log",
         retention_days=2,
         now_func=now,
     )
     handler.emit(
         logging.makeLogRecord(
             {
-                "name": "arbor_ddns.test",
+                "name": "dnsleaf.test",
                 "levelno": logging.INFO,
                 "levelname": "INFO",
                 "msg": "rotate",
@@ -113,13 +113,13 @@ def test_daily_symlink_handler_prunes_old_files_by_retention(tmp_path: Path) -> 
 
     assert not old_file.exists()
     assert keep_file.exists()
-    assert (tmp_path / "arbor-ddns-2026-04-01.log").exists()
+    assert (tmp_path / "dnsleaf-2026-04-01.log").exists()
 
 
 def test_configure_default_logging_uses_stderr_by_default(capsys) -> None:
     with _restore_root_logger():
         configure_default_logging()
-        logging.getLogger("arbor_ddns.test").warning("default logging active")
+        logging.getLogger("dnsleaf.test").warning("default logging active")
 
     captured = capsys.readouterr()
     assert "default logging active" in captured.err
@@ -148,8 +148,8 @@ def test_load_workspace_logging_config_preserves_stable_symlink_path_when_log_ex
 ) -> None:
     workspace = tmp_path / "lab"
     WorkspaceService().init_workspace(workspace)
-    symlink = workspace / "runtime" / "logs" / "arbor-ddns.log"
-    daily_file = workspace / "runtime" / "logs" / "arbor-ddns-2026-04-01.log"
+    symlink = workspace / "runtime" / "logs" / "dnsleaf.log"
+    daily_file = workspace / "runtime" / "logs" / "dnsleaf-2026-04-01.log"
     daily_file.parent.mkdir(parents=True, exist_ok=True)
     daily_file.write_text("existing\n", encoding="utf-8")
     symlink.symlink_to(daily_file)
@@ -163,16 +163,16 @@ def test_apply_logging_config_uses_supplied_runtime_config(tmp_path: Path) -> No
     config = ResolvedLoggingConfig(
         level=logging.INFO,
         format="%(message)s",
-        file_path=tmp_path / "arbor-ddns.log",
+        file_path=tmp_path / "dnsleaf.log",
         retention_days=7,
         stream="none",
     )
 
     with _restore_root_logger():
         apply_logging_config(config, close_existing=True)
-        logging.getLogger("arbor_ddns.test").info("applied from runtime config")
+        logging.getLogger("dnsleaf.test").info("applied from runtime config")
 
-    symlink = tmp_path / "arbor-ddns.log"
+    symlink = tmp_path / "dnsleaf.log"
     assert symlink.is_symlink()
     assert "applied from runtime config" in symlink.resolve().read_text(encoding="utf-8")
 
@@ -208,23 +208,23 @@ def test_apply_logging_config_reapply_keeps_stable_symlink_name(
     config = ResolvedLoggingConfig(
         level=logging.INFO,
         format="%(message)s",
-        file_path=tmp_path / "arbor-ddns.log",
+        file_path=tmp_path / "dnsleaf.log",
         retention_days=7,
         stream="none",
     )
 
     with _restore_root_logger():
         apply_logging_config(config, close_existing=True)
-        logging.getLogger("arbor_ddns.test").info("first write")
+        logging.getLogger("dnsleaf.test").info("first write")
         apply_logging_config(config, close_existing=True)
-        logging.getLogger("arbor_ddns.test").info("second write")
+        logging.getLogger("dnsleaf.test").info("second write")
 
-    symlink = tmp_path / "arbor-ddns.log"
-    dated_file = tmp_path / "arbor-ddns-2026-04-01.log"
-    duplicate_file = tmp_path / "arbor-ddns-2026-04-01-2026-04-01.log"
+    symlink = tmp_path / "dnsleaf.log"
+    dated_file = tmp_path / "dnsleaf-2026-04-01.log"
+    duplicate_file = tmp_path / "dnsleaf-2026-04-01-2026-04-01.log"
 
     assert symlink.is_symlink()
-    assert symlink == tmp_path / "arbor-ddns.log"
+    assert symlink == tmp_path / "dnsleaf.log"
     assert symlink.resolve() == dated_file.resolve()
     assert dated_file.exists()
     assert duplicate_file.exists() is False
@@ -245,13 +245,13 @@ def test_workspace_logging_context_uses_workspace_file_without_default_stderr_ou
             workspace,
             command_name="plan",
         ):
-            logging.getLogger("arbor_ddns.test").info("workspace logging active")
-        logging.getLogger("arbor_ddns.test").warning("restored stderr logging")
+            logging.getLogger("dnsleaf.test").info("workspace logging active")
+        logging.getLogger("dnsleaf.test").warning("restored stderr logging")
 
     captured = capsys.readouterr()
     assert "workspace logging active" not in captured.err
     assert "restored stderr logging" in captured.err
-    symlink = workspace / "runtime" / "logs" / "arbor-ddns.log"
+    symlink = workspace / "runtime" / "logs" / "dnsleaf.log"
     assert symlink.is_symlink()
     log_payload = symlink.resolve().read_text(encoding="utf-8")
     assert "workspace logging active" in log_payload
@@ -274,18 +274,18 @@ def test_absolute_path_without_symlink_resolution_uses_base_dir_for_relative_pat
     tmp_path: Path,
 ) -> None:
     path = absolute_path_without_symlink_resolution(
-        "runtime/logs/arbor-ddns.log",
+        "runtime/logs/dnsleaf.log",
         base_dir=tmp_path / "lab",
     )
 
-    assert path == tmp_path / "lab" / "runtime" / "logs" / "arbor-ddns.log"
+    assert path == tmp_path / "lab" / "runtime" / "logs" / "dnsleaf.log"
 
 
 def test_absolute_path_without_symlink_resolution_preserves_existing_symlink_name(
     tmp_path: Path,
 ) -> None:
-    symlink = tmp_path / "arbor-ddns.log"
-    dated_file = tmp_path / "arbor-ddns-2026-04-01.log"
+    symlink = tmp_path / "dnsleaf.log"
+    dated_file = tmp_path / "dnsleaf-2026-04-01.log"
     dated_file.write_text("existing\n", encoding="utf-8")
     symlink.symlink_to(dated_file)
 

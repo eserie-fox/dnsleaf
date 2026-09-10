@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from arbor_ddns.discovery.local_ip import LOCAL_DISCOVERY_COMMAND, LocalIPDiscoveryBackend
-from arbor_ddns.models import TargetKind, TargetRef
-from arbor_ddns.util.process import CommandExecutionError, CommandResult
+from dnsleaf.discovery.local_ip import LOCAL_DISCOVERY_COMMAND, LocalIPDiscoveryBackend
+from dnsleaf.models import TargetKind, TargetRef
+from dnsleaf.util.process import CommandExecutionError, CommandResult
 
 
 def test_local_ip_backend_parses_ip_output() -> None:
     sample_output = """
 2: eth0    inet 93.184.216.34/32 scope global
-2: eth0    inet6 2408:8266:5003:506a::3d6/128 scope global dynamic mngtmpaddr
+2: eth0    inet6 2001:4860:abcd:1234::3d6/128 scope global dynamic mngtmpaddr
 """.strip()
 
-    def fake_runner(args: Sequence[str]) -> CommandResult:
+    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
         assert list(args) == LOCAL_DISCOVERY_COMMAND
         return CommandResult(args=tuple(args), returncode=0, stdout=sample_output, stderr="")
 
@@ -24,7 +24,7 @@ def test_local_ip_backend_parses_ip_output() -> None:
     assert result.error is None
     assert [candidate.cidr for candidate in result.candidates] == [
         "93.184.216.34/32",
-        "2408:8266:5003:506a::3d6/128",
+        "2001:4860:abcd:1234::3d6/128",
     ]
 
 
@@ -42,7 +42,7 @@ def test_local_ip_backend_rejects_non_local_targets() -> None:
 
 
 def test_local_ip_backend_returns_discovery_error_on_subprocess_failure() -> None:
-    def fake_runner(args: Sequence[str]) -> CommandResult:
+    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
         raise CommandExecutionError(
             CommandResult(args=tuple(args), returncode=1, stdout="", stderr="boom")
         )

@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 from pydantic import ValidationError
 
-from arbor_ddns.dns.models import AUTO_TTL
-from arbor_ddns.models import EntrySourceKind, TargetKind
-from arbor_ddns.workspace.entries import EntryService
-from arbor_ddns.workspace.models import WorkspaceConfig, WorkspaceEntry
+from dnsleaf.dns.models import AUTO_TTL
+from dnsleaf.models import EntryAddressFamily, EntrySourceKind, TargetKind
+from dnsleaf.workspace.entries import EntryService
+from dnsleaf.workspace.models import WorkspaceConfig, WorkspaceEntry
 
 
 def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Path) -> None:
@@ -18,10 +18,10 @@ def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Pat
     added = service.add_entry(
         workspace_dir,
         name="web",
-        source_kind="lxc",
+        source_kind=EntrySourceKind.LXC,
         source_id=101,
         fqdn="host.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         ttl=60,
     )
     assert added.changed is True
@@ -36,7 +36,7 @@ def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Pat
         workspace_dir,
         name="web",
         fqdn="new.example.com",
-        family="both",
+        family=EntryAddressFamily.BOTH,
         proxied=True,
         enabled=False,
         description="updated",
@@ -62,22 +62,22 @@ def test_entry_add_and_update_static_entry(workspace_dir: Path) -> None:
     added = service.add_entry(
         workspace_dir,
         name="edge",
-        source_kind="static",
+        source_kind=EntrySourceKind.STATIC,
         fqdn="edge.example.com",
-        family="both",
+        family=EntryAddressFamily.BOTH,
         static_ipv4="93.184.216.34",
-        static_ipv6="2408:8266:5003:506a::88",
+        static_ipv6="2001:4860:abcd:1234::88",
     )
 
     assert added.entry is not None
     assert added.entry.source_kind.value == "static"
     assert added.entry.static_ipv4 == "93.184.216.34"
-    assert added.entry.static_ipv6 == "2408:8266:5003:506a::88"
+    assert added.entry.static_ipv6 == "2001:4860:abcd:1234::88"
 
     updated = service.update_entry(
         workspace_dir,
         name="edge",
-        family="ipv4",
+        family=EntryAddressFamily.IPV4,
         static_ipv4="8.8.8.8",
     )
 
@@ -92,9 +92,9 @@ def test_entry_add_local_entry(workspace_dir: Path) -> None:
     added = service.add_entry(
         workspace_dir,
         name="self",
-        source_kind="local",
+        source_kind=EntrySourceKind.LOCAL,
         fqdn="self.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
     )
 
     assert added.entry is not None
@@ -109,10 +109,10 @@ def test_entry_service_accepts_auto_ttl(workspace_dir: Path) -> None:
     added = service.add_entry(
         workspace_dir,
         name="web",
-        source_kind="lxc",
+        source_kind=EntrySourceKind.LXC,
         source_id=101,
         fqdn="host.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         ttl="auto",
     )
 
@@ -134,9 +134,9 @@ def test_workspace_config_accepts_auto_ttl_and_null_default_proxied(tmp_path: Pa
 def test_workspace_entry_effective_ttl_and_proxied_support_auto_and_null() -> None:
     entry = WorkspaceEntry(
         name="self",
-        source_kind="local",
+        source_kind=EntrySourceKind.LOCAL,
         fqdn="self.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         selection_policy="default",
         enabled=True,
         ttl="auto",
@@ -151,10 +151,10 @@ def test_entry_update_leaves_existing_proxied_override_when_omitted(workspace_di
     service.add_entry(
         workspace_dir,
         name="web",
-        source_kind="lxc",
+        source_kind=EntrySourceKind.LXC,
         source_id=101,
         fqdn="host.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         proxied=True,
     )
 
@@ -173,10 +173,10 @@ def test_entry_update_sets_proxied_false(workspace_dir: Path) -> None:
     service.add_entry(
         workspace_dir,
         name="web",
-        source_kind="lxc",
+        source_kind=EntrySourceKind.LXC,
         source_id=101,
         fqdn="host.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         proxied=True,
     )
 
@@ -195,10 +195,10 @@ def test_entry_update_can_clear_proxied_override_to_inherit(workspace_dir: Path)
     service.add_entry(
         workspace_dir,
         name="web",
-        source_kind="lxc",
+        source_kind=EntrySourceKind.LXC,
         source_id=101,
         fqdn="host.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         proxied=True,
     )
 
@@ -220,9 +220,9 @@ def test_workspace_entry_local_requires_selection_policy() -> None:
     with pytest.raises(ValidationError, match="dynamic local entries require selection_policy"):
         WorkspaceEntry(
             name="self",
-            source_kind="local",
+            source_kind=EntrySourceKind.LOCAL,
             fqdn="self.example.com",
-            family="ipv6",
+            family=EntryAddressFamily.IPV6,
             enabled=True,
         )
 
@@ -231,10 +231,10 @@ def test_workspace_entry_local_forbids_source_id() -> None:
     with pytest.raises(ValidationError, match="dynamic local entries must not define source_id"):
         WorkspaceEntry(
             name="self",
-            source_kind="local",
+            source_kind=EntrySourceKind.LOCAL,
             source_id=101,
             fqdn="self.example.com",
-            family="ipv6",
+            family=EntryAddressFamily.IPV6,
             selection_policy="default",
             enabled=True,
         )
@@ -247,9 +247,9 @@ def test_workspace_entry_local_forbids_static_values() -> None:
     ):
         WorkspaceEntry(
             name="self",
-            source_kind="local",
+            source_kind=EntrySourceKind.LOCAL,
             fqdn="self.example.com",
-            family="ipv4",
+            family=EntryAddressFamily.IPV4,
             selection_policy="default",
             enabled=True,
             static_ipv4="93.184.216.34",
@@ -259,9 +259,9 @@ def test_workspace_entry_local_forbids_static_values() -> None:
 def test_workspace_entry_local_converts_to_local_target_ref() -> None:
     entry = WorkspaceEntry(
         name="self",
-        source_kind="local",
+        source_kind=EntrySourceKind.LOCAL,
         fqdn="self.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         selection_policy="default",
         enabled=True,
     )
@@ -275,35 +275,35 @@ def test_workspace_entry_local_converts_to_local_target_ref() -> None:
 def test_workspace_entry_source_descriptor_formats_static_local_and_guest_targets() -> None:
     static_entry = WorkspaceEntry(
         name="edge",
-        source_kind="static",
+        source_kind=EntrySourceKind.STATIC,
         fqdn="edge.example.com",
-        family="ipv4",
+        family=EntryAddressFamily.IPV4,
         enabled=True,
         static_ipv4="93.184.216.34",
     )
     local_entry = WorkspaceEntry(
         name="self",
-        source_kind="local",
+        source_kind=EntrySourceKind.LOCAL,
         fqdn="self.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         enabled=True,
         selection_policy="default",
     )
     lxc_entry = WorkspaceEntry(
         name="web",
-        source_kind="lxc",
+        source_kind=EntrySourceKind.LXC,
         source_id=101,
         fqdn="web.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         enabled=True,
         selection_policy="default",
     )
     vm_entry = WorkspaceEntry(
         name="guest",
-        source_kind="vm",
+        source_kind=EntrySourceKind.VM,
         source_id=201,
         fqdn="guest.example.com",
-        family="ipv6",
+        family=EntryAddressFamily.IPV6,
         enabled=True,
         selection_policy="default",
     )

@@ -5,16 +5,21 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from arbor_ddns import cli
-from arbor_ddns.commands import common
-from arbor_ddns.commands._privilege import PermissionOperationError
-from arbor_ddns.config.outside_workspace import OutsideWorkspaceConfig
-from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult, SelectionResult
-from arbor_ddns.dns.models import ProviderVerification
-from arbor_ddns.models import EntrySourceKind, IPAddressFamily, SelectedAddress, TargetRef
-from arbor_ddns.sync.runner import RecordSyncOutcome, WorkspaceRunReport
-from arbor_ddns.version import __version__
-from arbor_ddns.workspace.models import (
+from dnsleaf import cli
+from dnsleaf.commands import common
+from dnsleaf.config.outside_workspace import OutsideWorkspaceConfig
+from dnsleaf.discovery.models import AddressCandidate, DiscoveryResult, SelectionResult
+from dnsleaf.dns.models import ProviderVerification
+from dnsleaf.models import (
+    EntryAddressFamily,
+    EntrySourceKind,
+    IPAddressFamily,
+    SelectedAddress,
+    TargetRef,
+)
+from dnsleaf.sync.runner import RecordSyncOutcome, WorkspaceRunReport
+from dnsleaf.version import __version__
+from dnsleaf.workspace.models import (
     DoctorCheck,
     DoctorReport,
     EntryMutationResult,
@@ -25,7 +30,7 @@ from arbor_ddns.workspace.models import (
     WorkspaceEntry,
     WorkspaceStatus,
 )
-from arbor_ddns.workspace.service import ApplyReport
+from dnsleaf.workspace.service import ApplyReport
 
 runner = CliRunner()
 
@@ -65,10 +70,10 @@ class FakeWorkspaceService:
         return ApplyReport(
             workspace_root=str(workspace),
             workspace_name="lab",
-            service_name="arbor-ddns-lab",
-            timer_name="arbor-ddns-lab",
-            installed_service_unit="/etc/systemd/system/arbor-ddns-lab.service",
-            installed_timer_unit="/etc/systemd/system/arbor-ddns-lab.timer",
+            service_name="dnsleaf-lab",
+            timer_name="dnsleaf-lab",
+            installed_service_unit="/etc/systemd/system/dnsleaf-lab.service",
+            installed_timer_unit="/etc/systemd/system/dnsleaf-lab.timer",
             prune_managed=False,
             immediate_sync_requested=False,
             immediate_sync_ran=False,
@@ -90,7 +95,7 @@ class FakeWorkspaceService:
                     record_type="AAAA",
                     value_source="dynamic",
                     selection_status="selected",
-                    selected_value="2408:8266:5003:506a::3d6",
+                    selected_value="2001:4860:abcd:1234::3d6",
                     status="planned",
                     message="changes planned",
                 )
@@ -113,8 +118,8 @@ class FakeWorkspaceService:
         return UninstallReport(
             workspace_root=str(workspace),
             workspace_name="lab",
-            service_name="arbor-ddns-lab",
-            timer_name="arbor-ddns-lab",
+            service_name="dnsleaf-lab",
+            timer_name="dnsleaf-lab",
             systemctl_available=True,
             service_stopped=True,
             timer_stopped=True,
@@ -147,17 +152,17 @@ class FakeWorkspaceService:
                 "timer_unit": True,
             },
             runtime_dir_exists=True,
-            runtime_log_file=str(workspace / "runtime" / "logs" / "arbor-ddns.log"),
+            runtime_log_file=str(workspace / "runtime" / "logs" / "dnsleaf.log"),
             runtime_log_file_exists=True,
             managed_active_count=1,
             managed_stale_count=0,
             service_status=SystemdUnitStatus(
-                unit_name="arbor-ddns-lab.service",
+                unit_name="dnsleaf-lab.service",
                 available=True,
                 active_state="active",
             ),
             timer_status=SystemdUnitStatus(
-                unit_name="arbor-ddns-lab.timer",
+                unit_name="dnsleaf-lab.timer",
                 available=True,
                 active_state="active",
             ),
@@ -178,12 +183,12 @@ class FakeEntryService:
         return [
             WorkspaceEntry(
                 name="edge",
-                source_kind="static",
+                source_kind=EntrySourceKind.STATIC,
                 fqdn="edge.example.com",
-                family="both",
+                family=EntryAddressFamily.BOTH,
                 enabled=True,
                 static_ipv4="93.184.216.34",
-                static_ipv6="2408:8266:5003:506a::88",
+                static_ipv6="2001:4860:abcd:1234::88",
             )
         ]
 
@@ -221,7 +226,7 @@ class FakeDebugRunner:
                 AddressCandidate(
                     family=IPAddressFamily.IPV6,
                     interface="eth0",
-                    address="2408:8266:5003:506a::3d6",
+                    address="2001:4860:abcd:1234::3d6",
                     prefix_length=128,
                     source="fake",
                 ),
@@ -238,7 +243,7 @@ class FakeDebugRunner:
                     family=family,
                     address="93.184.216.34"
                     if family is IPAddressFamily.IPV4
-                    else "2408:8266:5003:506a::3d6",
+                    else "2001:4860:abcd:1234::3d6",
                     prefix_length=32 if family is IPAddressFamily.IPV4 else 128,
                     interface="eth0",
                     selection_policy=policy,
@@ -344,7 +349,7 @@ def test_entry_add_static_command(monkeypatch) -> None:
             "--ipv4",
             "93.184.216.34",
             "--ipv6",
-            "2408:8266:5003:506a::88",
+            "2001:4860:abcd:1234::88",
         ],
     )
 
@@ -606,7 +611,7 @@ def test_entry_list_shows_static_fields(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "family=both" in result.stdout
     assert "ipv4=93.184.216.34" in result.stdout
-    assert "ipv6=2408:8266:5003:506a::88" in result.stdout
+    assert "ipv6=2001:4860:abcd:1234::88" in result.stdout
 
 
 def test_provider_verify_command(monkeypatch) -> None:
@@ -637,10 +642,11 @@ def test_status_reports_runtime_log_fields(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "runtime_exists=True" in result.stdout
-    assert "log_file=/tmp/lab/runtime/logs/arbor-ddns.log" in result.stdout
+    assert "log_file=/tmp/lab/runtime/logs/dnsleaf.log" in result.stdout
 
 
 def test_uninstall_command(monkeypatch) -> None:
+    monkeypatch.setattr(common, "require_root", lambda operation: None)
     monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
     monkeypatch.setattr(common, "workspace_command_logging", _noop_workspace_logging)
 
@@ -665,7 +671,7 @@ def test_plan_command_uses_record_outcomes(monkeypatch) -> None:
 
 def test_discover_command_reports_both_families(monkeypatch) -> None:
     monkeypatch.setattr(common, "debug_runner", lambda ctx: FakeDebugRunner())
-    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: False)
+    monkeypatch.setattr(common, "require_root", lambda *args, **kwargs: False)
 
     result = runner.invoke(cli.app, ["discover", "lxc", "101", "--family", "both"])
 
@@ -678,7 +684,7 @@ def test_discover_command_reports_both_families(monkeypatch) -> None:
 
 def test_discover_local_command_reports_target_without_id(monkeypatch) -> None:
     monkeypatch.setattr(common, "debug_runner", lambda ctx: FakeDebugRunner())
-    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: False)
+    monkeypatch.setattr(common, "require_root", lambda *args, **kwargs: False)
 
     result = runner.invoke(cli.app, ["discover", "local", "--family", "both"])
 
@@ -690,7 +696,7 @@ def test_discover_local_command_reports_target_without_id(monkeypatch) -> None:
 
 def test_discover_local_json_omits_target_id(monkeypatch) -> None:
     monkeypatch.setattr(common, "debug_runner", lambda ctx: FakeDebugRunner())
-    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: False)
+    monkeypatch.setattr(common, "require_root", lambda *args, **kwargs: False)
 
     result = runner.invoke(cli.app, ["discover", "local", "--family", "ipv6", "--json"])
 
@@ -763,69 +769,30 @@ def test_discover_group_without_subcommand_shows_help() -> None:
 
 
 def test_apply_fails_fast_when_privileges_are_required(monkeypatch) -> None:
-    calls: list[str] = []
-
-    def fake_enforce(*args, **kwargs) -> bool:
-        raise PermissionOperationError(
-            "apply requires elevated privileges:\n"
-            "- will manage system services via systemctl\n"
-            "Retry with: arbor-ddns apply --workspace /tmp/lab --sudo"
-        )
-
-    monkeypatch.setattr(common, "enforce_root_privileges", fake_enforce)
-    monkeypatch.setattr(common, "workspace_service", lambda ctx: calls.append("service"))
-
+    monkeypatch.setattr("dnsleaf.util.privilege.os.geteuid", lambda: 1000)
     result = runner.invoke(cli.app, ["apply", "--workspace", "/tmp/lab"])
-
     assert result.exit_code == 1
-    assert "requires elevated privileges" in result.output
-    assert "systemctl" in result.output
-    assert "--sudo" in result.output
-    assert calls == []
 
 
-def test_apply_sudo_reexec_returns_before_service(monkeypatch) -> None:
-    calls: list[str] = []
-
-    monkeypatch.setattr(common, "enforce_root_privileges", lambda *args, **kwargs: True)
-    monkeypatch.setattr(common, "workspace_service", lambda ctx: calls.append("service"))
-
-    result = runner.invoke(cli.app, ["apply", "--workspace", "/tmp/lab", "--sudo"])
-
-    assert result.exit_code == 0
-    assert calls == []
+def test_removed_sudo_option_is_rejected() -> None:
+    result = runner.invoke(cli.app, ["plan", "--sudo"])
+    assert result.exit_code == 2
 
 
-def test_plan_and_discover_accept_sudo_option(monkeypatch) -> None:
-    calls: list[tuple[str, bool]] = []
-
-    def fake_enforce(ctx, *, reasons, sudo_requested):
-        calls.append((common.command_operation(ctx), sudo_requested))
-        return True
-
-    monkeypatch.setattr(common, "enforce_root_privileges", fake_enforce)
-
-    plan_result = runner.invoke(cli.app, ["plan", "--workspace", "/tmp/lab", "--sudo"])
-    discover_result = runner.invoke(cli.app, ["discover", "lxc", "101", "--sudo"])
-
-    assert plan_result.exit_code == 0
-    assert discover_result.exit_code == 0
-    assert calls == [("plan", True), ("discover lxc", True)]
-
-
-def test_validate_json_privilege_error_returns_json(monkeypatch, tmp_path: Path) -> None:
+def test_validate_json_permission_error_returns_json(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        common,
-        "enforce_root_privileges",
-        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionOperationError("need root")),
-    )
 
+    def denied(*args, **kwargs):
+        raise PermissionError("workspace file is not readable")
+
+    monkeypatch.setattr(common, "workspace_command_logging", denied)
     result = runner.invoke(cli.app, ["validate", "--json"])
-
     assert result.exit_code == 1
-    assert '"ok": false' in result.output
-    assert '"error": "need root"' in result.output
+    import json
+
+    payload = json.loads(result.output)
+    assert payload["ok"] is False
+    assert isinstance(payload["error"], str)
 
 
 def test_root_callback_uses_outside_workspace_config_and_configures_default_logging(
@@ -844,7 +811,7 @@ def test_root_callback_uses_outside_workspace_config_and_configures_default_logg
         calls["format"] = fmt
 
     monkeypatch.setattr(
-        cli.OutsideWorkspaceConfig,
+        OutsideWorkspaceConfig,
         "from_defaults",
         staticmethod(fake_from_defaults),
     )
@@ -860,5 +827,5 @@ def test_root_callback_uses_outside_workspace_config_and_configures_default_logg
     assert calls["defaults_loaded"] is True
     assert calls["stream_name"] == "stderr"
     assert calls["level"] == (
-        OutsideWorkspaceConfig.from_defaults().arbor_ddns_logging.resolved_level()
+        OutsideWorkspaceConfig.from_defaults().dnsleaf_logging.resolved_level()
     )

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, NoReturn
 
 import pytest
 
-from arbor_ddns.workspace.service import WorkspaceService
+from dnsleaf.workspace.service import WorkspaceService
 
 
 def scaffold_workspace(tmp_path: Path, name: str = "lab") -> Path:
@@ -21,3 +22,14 @@ def scaffold_workspace(tmp_path: Path, name: str = "lab") -> Path:
 @pytest.fixture
 def workspace_dir(tmp_path: Path) -> Path:
     return scaffold_workspace(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def block_host_commands_and_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tests must inject process runners and HTTP transports."""
+
+    def denied(*args: Any, **kwargs: Any) -> NoReturn:
+        raise AssertionError("tests must use fake commands and network transports")
+
+    monkeypatch.setattr("subprocess.run", denied)
+    monkeypatch.setattr("socket.create_connection", denied)

@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.0 — pending release
+
+- Unified the project as `dnsleaf` (repository, PyPI distribution, package, CLI, and module entry).
+- Prepared public PyPI metadata, MIT licensing, setuptools resources, shared CI/build callers,
+  OIDC publishing jobs, and CI-aligned development commands.
+- Workspace schema 4 uses `dnsleaf_logging` and defaults-plus-overrides validation; entries remain
+  schema 2. Runtime paths resolve separately and unknown fields are rejected.
+- Removed automatic sudo re-execution. Systemd binds the installing Python environment and escapes
+  arguments correctly. Uninstall stops the timer first and reports essential cleanup failures.
+- Fixed normal sync to reject multiple remote records of the same name/type without deleting extras.
+- Retained managed-only prune, per-family safety, proxy preservation, and thin package interfaces.
+- Private installations require a fresh workspace after separate uninstall, without compatibility migration.
+
+See [1.1.0 notes](docs/release-notes/1.1.0.md) and [release gates](docs/release.md).
+
+## Pre-rename internal history
+
+The following 1.0.x entries describe the private `arbor-ddns` project. They are historical internal
+release-preparation records, not claims of earlier public `dnsleaf` releases. Commands and paths
+in the archived notes are not current installation instructions.
+
 ## 1.0.3 - 2026-04-02
 
 `arbor-ddns` 1.0.3 is ready for internal patch-release use on a local machine.
