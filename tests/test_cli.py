@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 from contextlib import nullcontext
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from dnsleaf import cli
@@ -33,6 +35,12 @@ from dnsleaf.workspace.models import (
 from dnsleaf.workspace.service import ApplyReport
 
 runner = CliRunner()
+
+
+def _plain_help(output: str) -> str:
+    """Remove ANSI styling that can split option names into multiple spans."""
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", output)
 
 
 def _noop_workspace_logging(*args, **kwargs):
@@ -567,13 +575,20 @@ def test_entry_add_command_accepts_no_proxied(monkeypatch) -> None:
     assert captured["proxied"] is False
 
 
-def test_entry_update_help_shows_proxied_flags() -> None:
-    result = runner.invoke(cli.app, ["entry", "update", "--help"])
+@pytest.mark.parametrize("color", [False, True], ids=["plain", "color"])
+def test_entry_update_help_shows_proxied_flags(color: bool) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["entry", "update", "--help"],
+        color=color,
+        env={"FORCE_COLOR": "1" if color else None, "NO_COLOR": None if color else "1"},
+    )
 
     assert result.exit_code == 0
-    assert "--proxied" in result.output
-    assert "--no-proxied" in result.output
-    assert "--inherit-proxied" in result.output
+    help_text = _plain_help(result.output)
+    assert "--proxied" in help_text
+    assert "--no-proxied" in help_text
+    assert "--inherit-proxied" in help_text
 
 
 def test_entry_add_defaults_workspace_to_current_directory(monkeypatch, tmp_path: Path) -> None:
@@ -714,11 +729,17 @@ def test_validate_without_workspace_fails_outside_workspace(monkeypatch, tmp_pat
     assert result.output == f"error=workspace file not found: {tmp_path / 'workspace.yaml'}\n"
 
 
-def test_root_help_does_not_expose_config_option() -> None:
-    result = runner.invoke(cli.app, ["--help"])
+@pytest.mark.parametrize("color", [False, True], ids=["plain", "color"])
+def test_root_help_does_not_expose_config_option(color: bool) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["--help"],
+        color=color,
+        env={"FORCE_COLOR": "1" if color else None, "NO_COLOR": None if color else "1"},
+    )
 
     assert result.exit_code == 0
-    assert "--config" not in result.stdout
+    assert "--config" not in _plain_help(result.stdout)
 
 
 def test_version_option_reports_package_version() -> None:

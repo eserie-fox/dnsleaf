@@ -460,7 +460,7 @@ class EntriesFile(BaseModel):
     def from_defaults(cls) -> EntriesFile:
         """Load formal entries defaults."""
 
-        return cls.from_mapping({})
+        return cls.model_validate(load_entries_defaults())
 
     @classmethod
     def from_file(cls, path: str | Path) -> EntriesFile:
@@ -470,7 +470,13 @@ class EntriesFile(BaseModel):
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> EntriesFile:
-        """Replace the entries list and validate the merged config."""
+        """Require an explicit operator-supplied list before merging defaults."""
+
+        if not isinstance(data, Mapping) or "entries" not in data:
+            raise ValueError(
+                "entries document must be a mapping with an explicit 'entries' field; "
+                "use entries: [] for an intentionally empty list"
+            )
 
         return cls.model_validate(deep_merge(load_entries_defaults(), data))
 

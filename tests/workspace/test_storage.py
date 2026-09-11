@@ -31,6 +31,10 @@ def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
     assert workspace_payload["default_proxied"] is None
     assert workspace_payload["paths"]["systemctl_bin"] == "systemctl"
 
+    entries_payload = yaml.safe_load((workspace / "entries.yaml").read_text(encoding="utf-8"))
+    assert entries_payload == {"config_version": 2, "entries": []}
+    assert WorkspaceStorage().load(workspace).entries_file == EntriesFile.from_defaults()
+
 
 def test_workspace_scaffold_defaults_build_typed_model() -> None:
     workspace_config = WorkspaceConfig.scaffold_defaults("lab")

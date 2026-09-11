@@ -71,6 +71,19 @@ use stderr. CLI entrypoints own logging contexts; services use ordinary standard
 
 ## Entries
 
+An operator-supplied entries document must be a mapping with an explicit `entries` list.
+Empty, comment-only, null, or incomplete documents (including `{}`) fail validation before DNS
+planning, regardless of the prune setting. To intentionally manage no desired records, use:
+
+```yaml
+config_version: 2
+entries: []
+```
+
+This explicit empty list preserves remote records when pruning is disabled. With managed-record
+pruning enabled, previously tracked records are eligible for deletion; untracked records remain
+untouched. `init` generates this valid empty-list form from the packaged defaults.
+
 See [entry management](entry_management.md) for CLI examples and the complete source shapes.
 `source_kind` is `lxc`, `vm`, `local`, or `static`; `family` is `ipv4`, `ipv6`, or `both`.
 Names must be unique. Dynamic entries require `selection_policy`; guest entries also need `source_id`.
