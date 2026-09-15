@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from arbor_ddns.discovery.models import AddressCandidate, DiscoveryResult
-from arbor_ddns.discovery.selectors import select_address
-from arbor_ddns.models import IPAddressFamily, TargetKind, TargetRef
+from dnsleaf.discovery.models import AddressCandidate, DiscoveryResult
+from dnsleaf.discovery.selectors import select_address
+from dnsleaf.models import IPAddressFamily, TargetKind, TargetRef
 
 
 def _candidate(
@@ -38,7 +38,7 @@ def test_ipv6_selector_filters_ula_and_selects_global_candidate() -> None:
         _result(
             [
                 _candidate(
-                    "2408:8266:5003:506a:be24:11ff:fefb:7700",
+                    "2001:4860:abcd:1234:1111:2222:3333:4444",
                     64,
                     family=IPAddressFamily.IPV6,
                     interface="eth0",
@@ -56,7 +56,7 @@ def test_ipv6_selector_filters_ula_and_selects_global_candidate() -> None:
 
     assert selection.status == "selected"
     assert selection.selected is not None
-    assert selection.selected.address == "2408:8266:5003:506a:be24:11ff:fefb:7700"
+    assert selection.selected.address == "2001:4860:abcd:1234:1111:2222:3333:4444"
     assert selection.filtered_out[0].reason == "unique_local"
 
 
@@ -64,9 +64,9 @@ def test_ipv6_selector_prefers_128_over_stable_64() -> None:
     selection = select_address(
         _result(
             [
-                _candidate("2408:8266:5003:506a::3d6", 128, family=IPAddressFamily.IPV6),
+                _candidate("2001:4860:abcd:1234::3d6", 128, family=IPAddressFamily.IPV6),
                 _candidate(
-                    "2408:8266:5003:506a:be24:11ff:feeb:aba3",
+                    "2001:4860:abcd:1234:5555:6666:7777:8888",
                     64,
                     family=IPAddressFamily.IPV6,
                 ),
@@ -86,14 +86,14 @@ def test_ipv6_selector_filters_deprecated_128_and_selects_healthy_64() -> None:
         _result(
             [
                 _candidate(
-                    "2408:8266:5003:506a::3d6",
+                    "2001:4860:abcd:1234::3d6",
                     128,
                     family=IPAddressFamily.IPV6,
                     scope="global",
                     flags=["deprecated", "dynamic", "mngtmpaddr"],
                 ),
                 _candidate(
-                    "2408:8266:5003:506a:be24:11ff:fefb:7700",
+                    "2001:4860:abcd:1234:1111:2222:3333:4444",
                     64,
                     family=IPAddressFamily.IPV6,
                     scope="global",
@@ -106,9 +106,9 @@ def test_ipv6_selector_filters_deprecated_128_and_selects_healthy_64() -> None:
 
     assert selection.status == "selected"
     assert selection.selected is not None
-    assert selection.selected.address == "2408:8266:5003:506a:be24:11ff:fefb:7700"
+    assert selection.selected.address == "2001:4860:abcd:1234:1111:2222:3333:4444"
     assert [(item.candidate.cidr, item.reason) for item in selection.filtered_out] == [
-        ("2408:8266:5003:506a::3d6/128", "deprecated")
+        ("2001:4860:abcd:1234::3d6/128", "deprecated")
     ]
 
 
@@ -117,14 +117,14 @@ def test_ipv6_selector_filters_tentative_candidate() -> None:
         _result(
             [
                 _candidate(
-                    "2408:8266:5003:506a::99",
+                    "2001:4860:abcd:1234::99",
                     128,
                     family=IPAddressFamily.IPV6,
                     scope="global",
                     flags=["tentative"],
                 ),
                 _candidate(
-                    "2408:8266:5003:506a:be24:11ff:feeb:aba3",
+                    "2001:4860:abcd:1234:5555:6666:7777:8888",
                     64,
                     family=IPAddressFamily.IPV6,
                     scope="global",
@@ -137,9 +137,9 @@ def test_ipv6_selector_filters_tentative_candidate() -> None:
 
     assert selection.status == "selected"
     assert selection.selected is not None
-    assert selection.selected.address == "2408:8266:5003:506a:be24:11ff:feeb:aba3"
+    assert selection.selected.address == "2001:4860:abcd:1234:5555:6666:7777:8888"
     assert [(item.candidate.cidr, item.reason) for item in selection.filtered_out] == [
-        ("2408:8266:5003:506a::99/128", "tentative")
+        ("2001:4860:abcd:1234::99/128", "tentative")
     ]
 
 
@@ -148,14 +148,14 @@ def test_ipv6_selector_filters_dadfailed_candidate() -> None:
         _result(
             [
                 _candidate(
-                    "2408:8266:5003:506a::77",
+                    "2001:4860:abcd:1234::77",
                     128,
                     family=IPAddressFamily.IPV6,
                     scope="global",
                     flags=["dadfailed"],
                 ),
                 _candidate(
-                    "2408:8266:5003:506a:be24:11ff:fefb:7700",
+                    "2001:4860:abcd:1234:1111:2222:3333:4444",
                     64,
                     family=IPAddressFamily.IPV6,
                     scope="global",
@@ -168,9 +168,9 @@ def test_ipv6_selector_filters_dadfailed_candidate() -> None:
 
     assert selection.status == "selected"
     assert selection.selected is not None
-    assert selection.selected.address == "2408:8266:5003:506a:be24:11ff:fefb:7700"
+    assert selection.selected.address == "2001:4860:abcd:1234:1111:2222:3333:4444"
     assert [(item.candidate.cidr, item.reason) for item in selection.filtered_out] == [
-        ("2408:8266:5003:506a::77/128", "dadfailed")
+        ("2001:4860:abcd:1234::77/128", "dadfailed")
     ]
 
 
@@ -179,25 +179,25 @@ def test_ipv6_selector_prefers_128_and_filters_link_local_for_vm_sample() -> Non
         _result(
             [
                 _candidate(
-                    "2408:8266:5003:506a::458",
+                    "2001:4860:abcd:1234::458",
                     128,
                     family=IPAddressFamily.IPV6,
                     interface="ens18",
                 ),
                 _candidate(
-                    "2408:8266:5003:506a:e27f:4076:f737:e75a",
+                    "2001:4860:abcd:1234:e27f:4076:f737:e75a",
                     64,
                     family=IPAddressFamily.IPV6,
                     interface="ens18",
                 ),
                 _candidate(
-                    "2408:8266:5003:506a:9d54:1c94:fbb1:b5ee",
+                    "2001:4860:abcd:1234:9d54:1c94:fbb1:b5ee",
                     64,
                     family=IPAddressFamily.IPV6,
                     interface="ens18",
                 ),
                 _candidate(
-                    "2408:8266:5003:506a:be24:11ff:fee8:826",
+                    "2001:4860:abcd:1234:be24:11ff:fee8:826",
                     64,
                     family=IPAddressFamily.IPV6,
                     interface="ens18",
@@ -215,7 +215,7 @@ def test_ipv6_selector_prefers_128_and_filters_link_local_for_vm_sample() -> Non
 
     assert selection.status == "selected"
     assert selection.selected is not None
-    assert selection.selected.address == "2408:8266:5003:506a::458"
+    assert selection.selected.address == "2001:4860:abcd:1234::458"
     assert {item.reason for item in selection.filtered_out} == {"link_local"}
 
 
@@ -224,12 +224,12 @@ def test_ipv6_selector_returns_ambiguous_for_multiple_random_global_64s() -> Non
         _result(
             [
                 _candidate(
-                    "2408:8266:5003:506a:e27f:4076:f737:e75a",
+                    "2001:4860:abcd:1234:e27f:4076:f737:e75a",
                     64,
                     family=IPAddressFamily.IPV6,
                 ),
                 _candidate(
-                    "2408:8266:5003:506a:9d54:1c94:fbb1:b5ee",
+                    "2001:4860:abcd:1234:9d54:1c94:fbb1:b5ee",
                     64,
                     family=IPAddressFamily.IPV6,
                 ),

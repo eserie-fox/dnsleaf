@@ -4,11 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 
-from arbor_ddns.workspace.models import EntriesFile, WorkspaceConfig
-from arbor_ddns.workspace.service import WorkspaceService
-from arbor_ddns.workspace.storage import WorkspaceInitError, WorkspaceStorage
+from dnsleaf.workspace.models import EntriesFile, WorkspaceConfig
+from dnsleaf.workspace.service import WorkspaceService
+from dnsleaf.workspace.storage import WorkspaceInitError, WorkspaceStorage
 
 
 def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
@@ -26,10 +26,14 @@ def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
     assert (workspace / "state" / "managed-records.json").exists()
 
     workspace_payload = yaml.safe_load((workspace / "workspace.yaml").read_text(encoding="utf-8"))
-    assert workspace_payload["config_version"] == 3
+    assert workspace_payload["config_version"] == 4
     assert workspace_payload["default_ttl"] == "auto"
     assert workspace_payload["default_proxied"] is None
     assert workspace_payload["paths"]["systemctl_bin"] == "systemctl"
+
+    entries_payload = yaml.safe_load((workspace / "entries.yaml").read_text(encoding="utf-8"))
+    assert entries_payload == {"config_version": 2, "entries": []}
+    assert WorkspaceStorage().load(workspace).entries_file == EntriesFile.from_defaults()
 
 
 def test_workspace_scaffold_defaults_build_typed_model() -> None:
@@ -40,8 +44,8 @@ def test_workspace_scaffold_defaults_build_typed_model() -> None:
     assert workspace_config.default_proxied is None
     assert workspace_config.paths.pct_bin == "pct"
     assert workspace_config.paths.systemctl_bin == "systemctl"
-    assert workspace_config.arbor_ddns_logging.file_path == "runtime/logs/arbor-ddns.log"
-    assert workspace_config.arbor_ddns_logging.stream == "none"
+    assert workspace_config.dnsleaf_logging.file_path == "runtime/logs/dnsleaf.log"
+    assert workspace_config.dnsleaf_logging.stream == "none"
 
 
 def test_entries_scaffold_defaults_build_typed_model() -> None:
@@ -84,7 +88,7 @@ def test_validate_rejects_old_workspace_schema_version(workspace_dir: Path) -> N
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="config_version must be exactly 3"):
+    with pytest.raises(ValueError, match="config_version must be exactly 4"):
         WorkspaceService().validate_workspace(workspace_dir)
 
 
@@ -98,9 +102,10 @@ def test_validate_resolves_relative_systemd_unit_dir(workspace_dir: Path) -> Non
 
     loaded = WorkspaceStorage().validate(workspace_dir)
 
-    assert loaded.resolved_workspace.paths.resolved_systemd_unit_dir() == (
-        workspace_dir / "local" / "systemd"
-    ).resolve()
+    assert (
+        loaded.resolved_workspace.paths.resolved_systemd_unit_dir()
+        == (workspace_dir / "local" / "systemd").resolve()
+    )
 
 
 def test_validate_rejects_old_record_type_entry_schema(workspace_dir: Path) -> None:
@@ -132,7 +137,7 @@ def test_validate_rejects_static_entry_without_matching_values(workspace_dir: Pa
             "    source_kind: static\n"
             "    fqdn: edge.example.com\n"
             "    family: both\n"
-            "    static_ipv6: 2408:8266:5003:506a::88\n"
+            "    static_ipv6: 2001:4860:abcd:1234::88\n"
             "    enabled: true\n"
         ),
         encoding="utf-8",

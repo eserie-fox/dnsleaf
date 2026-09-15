@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from arbor_ddns.dns.cloudflare import (
+from dnsleaf.dns.cloudflare import (
     CloudflareAPIError,
     CloudflareAuthenticationError,
     CloudflareConflictError,
@@ -15,7 +15,7 @@ from arbor_ddns.dns.cloudflare import (
     CloudflarePermissionError,
     CloudflareProviderConfig,
 )
-from arbor_ddns.dns.models import DesiredRecord, DNSRecord, PlannedChange
+from dnsleaf.dns.models import DesiredRecord, DNSRecord, PlannedChange
 
 
 def _token_file(tmp_path: Path, content: str = "secret-token\n") -> Path:
@@ -106,9 +106,9 @@ def test_provider_lists_records_and_maps_response(tmp_path: Path) -> None:
                         "id": "rec-1",
                         "type": "AAAA",
                         "name": "host.example.com",
-                        "content": "2408:8266:5003:506a::3d6",
+                        "content": "2001:4860:abcd:1234::3d6",
                         "ttl": 120,
-                        "proxied": False
+                        "proxied": False,
                     }
                 ],
             }
@@ -126,7 +126,7 @@ def test_provider_lists_records_and_maps_response(tmp_path: Path) -> None:
             provider="cloudflare",
             fqdn="host.example.com",
             record_type="AAAA",
-            value="2408:8266:5003:506a::3d6",
+            value="2001:4860:abcd:1234::3d6",
             ttl=120,
             record_id="rec-1",
             proxied=False,
@@ -155,7 +155,7 @@ def test_provider_builds_create_request(tmp_path: Path) -> None:
                         "name": "host.example.com",
                         "content": "203.0.113.7",
                         "ttl": 120,
-                        "proxied": False
+                        "proxied": False,
                     },
                 }
             )
@@ -215,7 +215,7 @@ def test_provider_create_omits_unmanaged_proxied_and_sends_auto_ttl(tmp_path: Pa
                         "id": "rec-1",
                         "type": "AAAA",
                         "name": "host.example.com",
-                        "content": "2408:8266:5003:506a::3d6",
+                        "content": "2001:4860:abcd:1234::3d6",
                         "ttl": 1,
                         "proxied": False,
                     },
@@ -238,7 +238,7 @@ def test_provider_create_omits_unmanaged_proxied_and_sends_auto_ttl(tmp_path: Pa
                 provider="cloudflare",
                 fqdn="host.example.com",
                 record_type="AAAA",
-                value="2408:8266:5003:506a::3d6",
+                value="2001:4860:abcd:1234::3d6",
                 ttl=1,
                 proxied=None,
             ),
@@ -251,7 +251,7 @@ def test_provider_create_omits_unmanaged_proxied_and_sends_auto_ttl(tmp_path: Pa
         {
             "type": "AAAA",
             "name": "host.example.com",
-            "content": "2408:8266:5003:506a::3d6",
+            "content": "2001:4860:abcd:1234::3d6",
             "ttl": 1,
         }
     ]
@@ -270,9 +270,9 @@ def test_provider_builds_update_request(tmp_path: Path) -> None:
                         "id": "rec-1",
                         "type": "AAAA",
                         "name": "host.example.com",
-                        "content": "2408:8266:5003:506a::3d6",
+                        "content": "2001:4860:abcd:1234::3d6",
                         "ttl": 120,
-                        "proxied": False
+                        "proxied": False,
                     },
                 }
             )
@@ -293,7 +293,7 @@ def test_provider_builds_update_request(tmp_path: Path) -> None:
                 provider="cloudflare",
                 fqdn="host.example.com",
                 record_type="AAAA",
-                value="2408:8266:5003:506a::111",
+                value="2001:4860:abcd:1234::111",
                 ttl=300,
                 record_id="rec-1",
                 proxied=False,
@@ -302,7 +302,7 @@ def test_provider_builds_update_request(tmp_path: Path) -> None:
                 provider="cloudflare",
                 fqdn="host.example.com",
                 record_type="AAAA",
-                value="2408:8266:5003:506a::3d6",
+                value="2001:4860:abcd:1234::3d6",
                 ttl=120,
                 proxied=False,
             ),
@@ -311,7 +311,7 @@ def test_provider_builds_update_request(tmp_path: Path) -> None:
     )
 
     assert updated is not None
-    assert patch_payloads == [{"content": "2408:8266:5003:506a::3d6", "ttl": 120}]
+    assert patch_payloads == [{"content": "2001:4860:abcd:1234::3d6", "ttl": 120}]
 
 
 def test_provider_update_omits_unmanaged_proxied_and_ignores_forced_auto_ttl(
@@ -329,7 +329,7 @@ def test_provider_update_omits_unmanaged_proxied_and_ignores_forced_auto_ttl(
                         "id": "rec-1",
                         "type": "AAAA",
                         "name": "host.example.com",
-                        "content": "2408:8266:5003:506a::3d6",
+                        "content": "2001:4860:abcd:1234::3d6",
                         "ttl": 1,
                         "proxied": True,
                     },
@@ -352,7 +352,7 @@ def test_provider_update_omits_unmanaged_proxied_and_ignores_forced_auto_ttl(
                 provider="cloudflare",
                 fqdn="host.example.com",
                 record_type="AAAA",
-                value="2408:8266:5003:506a::111",
+                value="2001:4860:abcd:1234::111",
                 ttl=1,
                 record_id="rec-1",
                 proxied=True,
@@ -361,7 +361,7 @@ def test_provider_update_omits_unmanaged_proxied_and_ignores_forced_auto_ttl(
                 provider="cloudflare",
                 fqdn="host.example.com",
                 record_type="AAAA",
-                value="2408:8266:5003:506a::3d6",
+                value="2001:4860:abcd:1234::3d6",
                 ttl=300,
                 proxied=None,
             ),
@@ -370,7 +370,7 @@ def test_provider_update_omits_unmanaged_proxied_and_ignores_forced_auto_ttl(
     )
 
     assert updated is not None
-    assert patch_payloads == [{"content": "2408:8266:5003:506a::3d6"}]
+    assert patch_payloads == [{"content": "2001:4860:abcd:1234::3d6"}]
 
 
 def test_provider_update_explicit_proxied_true_uses_auto_ttl(tmp_path: Path) -> None:
@@ -454,7 +454,7 @@ def test_provider_builds_delete_request(tmp_path: Path) -> None:
                 provider="cloudflare",
                 fqdn="host.example.com",
                 record_type="AAAA",
-                value="2408:8266:5003:506a::3d6",
+                value="2001:4860:abcd:1234::3d6",
                 ttl=120,
                 record_id="rec-1",
                 proxied=False,
@@ -516,7 +516,7 @@ def test_provider_raises_clear_cname_conflict(tmp_path: Path) -> None:
                             "type": "CNAME",
                             "name": "host.example.com",
                             "content": "other.example.com",
-                            "ttl": 120
+                            "ttl": 120,
                         }
                     ],
                 }
@@ -539,7 +539,7 @@ def test_provider_raises_clear_cname_conflict(tmp_path: Path) -> None:
                     provider="cloudflare",
                     fqdn="host.example.com",
                     record_type="AAAA",
-                    value="2408:8266:5003:506a::3d6",
+                    value="2001:4860:abcd:1234::3d6",
                     ttl=120,
                     proxied=False,
                 ),
@@ -617,3 +617,27 @@ def test_provider_raises_permission_error_on_non_auth_403(tmp_path: Path) -> Non
 
     with pytest.raises(CloudflarePermissionError):
         provider.list_records("host.example.com", "AAAA")
+
+
+def test_provider_redacts_token_echoed_by_remote_error(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _response_json(
+            {
+                "success": False,
+                "errors": [
+                    {"code": 1000, "message": "invalid secret-token"},
+                ],
+            },
+            status_code=403,
+        )
+
+    provider = CloudflareDNSProvider(
+        _config(tmp_path),
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    with pytest.raises(CloudflarePermissionError) as error:
+        provider.resolve_zone_id()
+    assert "secret-token" not in str(error.value)
+    assert "[redacted]" in str(error.value)

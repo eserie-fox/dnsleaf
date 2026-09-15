@@ -4,7 +4,7 @@ Discovery is responsible for gathering candidate addresses from dynamic targets.
 
 ## Local backend
 
-The local backend runs on the machine currently executing arbor-ddns:
+The local backend runs on the machine currently executing dnsleaf:
 
 ```text
 ip -o addr show

@@ -1,0 +1,130 @@
+"""Planner for desired DNS state versus current provider state."""
+
+from __future__ import annotations
+
+from dnsleaf.dns.models import DesiredRecord, DNSRecord, PlannedChange, SyncPlan
+
+
+def _ttl_matches(current: DNSRecord, desired: DesiredRecord) -> bool:
+    if desired.proxied is None and current.proxied is True:
+        return True
+    return current.ttl == desired.ttl
+
+
+def _proxied_matches(current: DNSRecord, desired: DesiredRecord) -> bool:
+    if desired.proxied is None:
+        return True
+    return current.proxied == desired.proxied
+
+
+def _record_matches(current: DNSRecord, desired: DesiredRecord) -> bool:
+    return (
+        current.value == desired.value
+        and _ttl_matches(current, desired)
+        and _proxied_matches(current, desired)
+    )
+
+
+def plan_dns_changes(
+    *,
+    current_records: list[DNSRecord],
+    desired_record: DesiredRecord | None,
+) -> SyncPlan:
+    """Generate a deterministic create/update/delete/noop plan."""
+
+    if desired_record is None:
+        if not current_records:
+            return SyncPlan(
+                provider="unknown",
+                fqdn="unknown",
+                record_type="AAAA",
+                desired=None,
+                changes=[
+                    PlannedChange(
+                        action="noop",
+                        provider="unknown",
+                        fqdn="unknown",
+                        record_type="AAAA",
+                        reason="no desired record and no current record",
+                    )
+                ],
+            )
+        return SyncPlan(
+            provider=current_records[0].provider,
+            fqdn=current_records[0].fqdn,
+            record_type=current_records[0].record_type,
+            desired=None,
+            changes=[
+                PlannedChange(
+                    action="delete",
+                    provider=record.provider,
+                    fqdn=record.fqdn,
+                    record_type=record.record_type,
+                    current=record,
+                    reason="no desired record remains",
+                )
+                for record in current_records
+            ],
+        )
+
+    if not current_records:
+        return SyncPlan(
+            provider=desired_record.provider,
+            fqdn=desired_record.fqdn,
+            record_type=desired_record.record_type,
+            desired=desired_record,
+            changes=[
+                PlannedChange(
+                    action="create",
+                    provider=desired_record.provider,
+                    fqdn=desired_record.fqdn,
+                    record_type=desired_record.record_type,
+                    desired=desired_record,
+                    reason="record does not exist yet",
+                )
+            ],
+        )
+
+    if len(current_records) > 1:
+        raise ValueError(
+            "multiple remote records for this name/type; refusing to choose or delete records"
+        )
+
+    if _record_matches(current_records[0], desired_record):
+        return SyncPlan(
+            provider=desired_record.provider,
+            fqdn=desired_record.fqdn,
+            record_type=desired_record.record_type,
+            desired=desired_record,
+            changes=[
+                PlannedChange(
+                    action="noop",
+                    provider=desired_record.provider,
+                    fqdn=desired_record.fqdn,
+                    record_type=desired_record.record_type,
+                    current=current_records[0],
+                    desired=desired_record,
+                    reason="current record already matches desired state",
+                )
+            ],
+        )
+
+    primary_record = current_records[0]
+    changes = [
+        PlannedChange(
+            action="update",
+            provider=primary_record.provider,
+            fqdn=primary_record.fqdn,
+            record_type=primary_record.record_type,
+            current=primary_record,
+            desired=desired_record,
+            reason="current record differs from desired state",
+        )
+    ]
+    return SyncPlan(
+        provider=desired_record.provider,
+        fqdn=desired_record.fqdn,
+        record_type=desired_record.record_type,
+        desired=desired_record,
+        changes=changes,
+    )

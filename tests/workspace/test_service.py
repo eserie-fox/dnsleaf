@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider, FakeSystemdManager
+import pytest
 
-from arbor_ddns.discovery.models import AddressCandidate
-from arbor_ddns.dns.models import DNSRecord
-from arbor_ddns.logging import workspace_logging_context
-from arbor_ddns.models import IPAddressFamily, TargetKind
-from arbor_ddns.sync.runner import SyncRunner
-from arbor_ddns.workspace.entries import EntryService
-from arbor_ddns.workspace.service import WorkspaceService
-from arbor_ddns.workspace.state import load_last_apply, load_managed_records
-from arbor_ddns.workspace.storage import WorkspaceStorage
+from dnsleaf.discovery.models import AddressCandidate
+from dnsleaf.dns.models import DNSRecord
+from dnsleaf.logging.runtime import workspace_logging_context
+from dnsleaf.models import IPAddressFamily, TargetKind
+from dnsleaf.sync.runner import SyncRunner
+from dnsleaf.workspace.entries import EntryService
+from dnsleaf.workspace.service import WorkspaceService
+from dnsleaf.workspace.state import load_last_apply, load_managed_records
+from dnsleaf.workspace.storage import WorkspaceStorage
+from tests.fakes import FakeDiscoveryBackend, FakeDNSProvider, FakeSystemdManager
 
 
 def _service(
@@ -70,7 +71,7 @@ def test_provider_verify_uses_workspace_provider(tmp_path: Path, monkeypatch) ->
     workspace_dir = scaffold_workspace(tmp_path)
     service = _service(tmp_path, FakeDNSProvider())
     monkeypatch.setattr(
-        "arbor_ddns.workspace.service.CloudflareDNSProvider",
+        "dnsleaf.workspace.service.CloudflareDNSProvider",
         lambda config: FakeDNSProvider(),
     )
 
@@ -84,9 +85,7 @@ def test_sync_once_updates_managed_record_state_and_prunes_safely(tmp_path: Path
     from tests.conftest import scaffold_workspace
 
     workspace_dir = scaffold_workspace(tmp_path)
-    entries = EntryService(
-        WorkspaceStorage()
-    )
+    entries = EntryService(WorkspaceStorage())
     entries.add_entry(
         workspace_dir,
         name="web",
@@ -166,7 +165,7 @@ def test_plan_creates_runtime_log_without_secret_contents(tmp_path: Path) -> Non
     ):
         service.plan_workspace(workspace_dir)
 
-    log_file = workspace_dir / "runtime" / "logs" / "arbor-ddns.log"
+    log_file = workspace_dir / "runtime" / "logs" / "dnsleaf.log"
     log_content = log_file.resolve().read_text(encoding="utf-8")
     assert log_file.is_symlink()
     assert "command=plan" in log_content
@@ -185,7 +184,7 @@ def test_status_aggregates_state_and_systemd(tmp_path: Path) -> None:
         fqdn="edge.example.com",
         family="both",
         static_ipv4="93.184.216.34",
-        static_ipv6="2408:8266:5003:506a::88",
+        static_ipv6="2001:4860:abcd:1234::88",
     )
     service = _service(tmp_path, FakeDNSProvider())
     service.render_workspace(workspace_dir)
@@ -197,7 +196,7 @@ def test_status_aggregates_state_and_systemd(tmp_path: Path) -> None:
     assert status.entry_count == 1
     assert status.rendered_artifacts["effective_workspace"] is True
     assert status.runtime_dir_exists is True
-    assert status.runtime_log_file.endswith("runtime/logs/arbor-ddns.log")
+    assert status.runtime_log_file.endswith("runtime/logs/dnsleaf.log")
     assert status.service_status.active_state == "active"
 
 
@@ -257,11 +256,11 @@ def test_uninstall_removes_runtime_and_rendered_but_keeps_workspace_state(tmp_pa
     assert (workspace_dir / "entries.yaml").exists() is True
     assert (workspace_dir / "secrets").exists() is True
     assert (workspace_dir / "state").exists() is True
-    assert report.manual_cleanup_hint == f"rm -rf {workspace_dir.resolve()}"
+    assert report.manual_cleanup_hint == f"rm -rf -- {workspace_dir.resolve()}"
     assert report.service_reset_failed is True
     assert report.timer_reset_failed is True
-    assert ("arbor-ddns-lab", "service") in systemd_manager.reset_failed_units
-    assert ("arbor-ddns-lab", "timer") in systemd_manager.reset_failed_units
+    assert ("dnsleaf-lab", "service") in systemd_manager.reset_failed_units
+    assert ("dnsleaf-lab", "timer") in systemd_manager.reset_failed_units
     assert provider.applied_actions == []
 
 
@@ -303,7 +302,7 @@ def test_apply_preserves_unmanaged_records_and_prunes_only_tracked_stale_records
             AddressCandidate(
                 family=IPAddressFamily.IPV6,
                 interface="eth0",
-                address="2408:8266:5003:506a::88",
+                address="2001:4860:abcd:1234::88",
                 prefix_length=128,
                 source="fake_discovery",
             ),
@@ -313,7 +312,7 @@ def test_apply_preserves_unmanaged_records_and_prunes_only_tracked_stale_records
         provider="cloudflare",
         fqdn="keep.example.com",
         record_type="AAAA",
-        value="2408:8266:5003:506a::999",
+        value="2001:4860:abcd:1234::999",
         ttl=120,
         proxied=False,
         record_id="unmanaged-1",
@@ -327,3 +326,113 @@ def test_apply_preserves_unmanaged_records_and_prunes_only_tracked_stale_records
 
     assert len(report.prune_outcomes) == 2
     assert provider.list_records("keep.example.com", "AAAA")[0].record_id == "unmanaged-1"
+
+
+def test_uninstall_stops_timer_before_service(tmp_path: Path) -> None:
+    from tests.conftest import scaffold_workspace
+
+    workspace = scaffold_workspace(tmp_path)
+    service, manager = _service_with_manager(tmp_path, FakeDNSProvider())
+    service.uninstall_workspace(workspace)
+    assert manager.calls[:3] == ["stop_timer", "stop_service", "disable_timer"]
+
+
+@pytest.mark.parametrize("failed_action", ["stop_timer", "stop_service", "disable_timer"])
+def test_failed_uninstall_preserves_workspace_and_units(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_action: str,
+) -> None:
+    from dnsleaf.systemd import SystemdError
+    from dnsleaf.util.process import CommandResult
+    from tests.conftest import scaffold_workspace
+
+    workspace = scaffold_workspace(tmp_path)
+    provider = FakeDNSProvider()
+    service, manager = _service_with_manager(tmp_path, provider)
+    service.apply_workspace(workspace, run_sync=False)
+    monkeypatch.setattr(
+        manager,
+        failed_action,
+        lambda *args, **kwargs: CommandResult(
+            args=("systemctl", failed_action),
+            returncode=1,
+            stdout="",
+            stderr="Access denied",
+        ),
+    )
+    with pytest.raises(SystemdError, match="Access denied"):
+        service.uninstall_workspace(workspace, purge=True)
+    assert (workspace / "workspace.yaml").exists()
+    assert (workspace / "runtime").exists()
+    assert (workspace / "state").exists()
+    assert (manager.unit_dir / "dnsleaf-lab.service").exists()
+    assert provider.applied_actions == []
+
+
+def test_sync_checks_state_writability_before_remote_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.conftest import scaffold_workspace
+
+    workspace = scaffold_workspace(tmp_path)
+    provider = FakeDNSProvider()
+    service = _service(tmp_path, provider)
+
+    def denied(path: Path) -> None:
+        raise PermissionError("state is read-only")
+
+    monkeypatch.setattr("dnsleaf.workspace.service.ensure_writable_directory", denied)
+    with pytest.raises(PermissionError, match="state is read-only"):
+        service.sync_once(workspace, apply=True)
+    assert provider.applied_actions == []
+
+
+def test_sync_preserves_duplicate_remote_records_without_prune(tmp_path: Path) -> None:
+    from tests.conftest import scaffold_workspace
+
+    workspace = scaffold_workspace(tmp_path)
+    EntryService().add_entry(
+        workspace,
+        name="edge",
+        source_kind="static",
+        family="ipv4",
+        fqdn="edge.example.com",
+        static_ipv4="192.0.2.1",
+    )
+    records = [
+        DNSRecord(
+            provider="cloudflare",
+            fqdn="edge.example.com",
+            record_type="A",
+            value=f"192.0.2.{index}",
+            ttl=1,
+            record_id=f"record-{index}",
+        )
+        for index in [1, 2]
+    ]
+    provider = FakeDNSProvider(records)
+    report = _service(tmp_path, provider).sync_once(workspace, apply=True)
+    assert report.has_errors()
+    assert "refusing to choose or delete" in report.record_outcomes[0].message
+    assert provider.applied_actions == []
+    assert provider.list_records("edge.example.com", "A") == records
+
+
+def test_uninstall_refuses_external_generated_directory_symlink(tmp_path: Path) -> None:
+    import shutil
+
+    from tests.conftest import scaffold_workspace
+
+    workspace = scaffold_workspace(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "keep.txt"
+    sentinel.write_text("keep")
+    shutil.rmtree(workspace / "rendered")
+    (workspace / "rendered").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="outside workspace root"):
+        _service(tmp_path, FakeDNSProvider()).uninstall_workspace(workspace, purge=True)
+    assert sentinel.read_text() == "keep"
+    assert workspace.exists()
