@@ -31,6 +31,8 @@ from dnsleaf.workspace.models import (
 )
 from dnsleaf.workspace.renderer import WorkspaceRenderer
 from dnsleaf.workspace.state import (
+    dns_target,
+    enabled_dns_targets,
     load_last_apply,
     load_managed_records,
     managed_record_counts,
@@ -711,30 +713,57 @@ class WorkspaceService:
         state: ManagedRecordFile,
         report: WorkspaceRunReport,
     ) -> ManagedRecordFile:
-        enabled_descriptors = {
-            descriptor
-            for entry in loaded.entries_file.enabled_entries()
-            for descriptor in entry.descriptors()
-        }
-        records_by_descriptor = {record.descriptor: record for record in state.records}
+        desired_targets = enabled_dns_targets(loaded.entries_file)
+        records_by_identity: dict[tuple[str, str, str | None], ManagedRecordSnapshot] = {}
         now = _utc_now()
 
-        for record in records_by_descriptor.values():
-            record.state = "active" if record.descriptor in enabled_descriptors else "stale"
-            record.last_seen_at = now
+        # Keep the newest observation for duplicate snapshots of one remote record,
+        # while preserving its first ownership timestamp and current configured label.
+        for record in sorted(state.records, key=lambda item: item.last_seen_at):
+            target = dns_target(record.fqdn, record.record_type)
+            identity = (*target, record.record_id)
+            existing = records_by_identity.get(identity)
+            records_by_identity[identity] = record.model_copy(
+                update={
+                    "fqdn": target[0],
+                    "record_type": target[1],
+                    "entry_name": desired_targets.get(target, record.entry_name),
+                    "state": "active" if target in desired_targets else "stale",
+                    "first_managed_at": min(existing.first_managed_at, record.first_managed_at)
+                    if existing is not None
+                    else record.first_managed_at,
+                    "last_seen_at": now,
+                }
+            )
 
         for outcome in report.record_outcomes:
             if outcome.final_record is None:
                 continue
-            descriptor = f"{outcome.entry_name}|{outcome.fqdn}|{outcome.record_type}"
-            existing = records_by_descriptor.get(descriptor)
-            first_managed_at = existing.first_managed_at if existing is not None else now
-            records_by_descriptor[descriptor] = ManagedRecordSnapshot(
+            target = dns_target(outcome.fqdn, outcome.record_type)
+            record_id = outcome.final_record.record_id
+            matching = [
+                identity
+                for identity in records_by_identity
+                if identity[:2] == target or (record_id is not None and identity[2] == record_id)
+            ]
+            first_managed_at = min(
+                (
+                    records_by_identity[identity].first_managed_at
+                    for identity in matching
+                    if identity[2] == record_id
+                ),
+                default=now,
+            )
+            # Successful normal sync establishes the current single record for this
+            # target. Replace obsolete snapshots, including aliases of the same ID.
+            for identity in matching:
+                del records_by_identity[identity]
+            records_by_identity[(*target, record_id)] = ManagedRecordSnapshot(
                 workspace_name=loaded.resolved_workspace.workspace_name,
-                entry_name=outcome.entry_name,
-                fqdn=outcome.fqdn,
-                record_type=outcome.record_type,
-                record_id=outcome.final_record.record_id,
+                entry_name=desired_targets[target],
+                fqdn=target[0],
+                record_type=target[1],
+                record_id=record_id,
                 value=outcome.final_record.value,
                 ttl=outcome.final_record.ttl,
                 proxied=outcome.final_record.proxied,
@@ -743,21 +772,20 @@ class WorkspaceService:
                 last_seen_at=now,
             )
 
-        removed_descriptors: set[str] = set()
         for prune_outcome in report.prune_outcomes:
             if prune_outcome.status not in {"applied", "confirmed_absent"}:
                 continue
-            descriptor = (
-                f"{prune_outcome.entry_name}|{prune_outcome.fqdn}|{prune_outcome.record_type}"
+            identity = (
+                *dns_target(prune_outcome.fqdn, prune_outcome.record_type),
+                prune_outcome.record_id,
             )
-            removed_descriptors.add(descriptor)
+            records_by_identity.pop(identity, None)
 
         return ManagedRecordFile(
-            records=[
-                record
-                for descriptor, record in sorted(records_by_descriptor.items())
-                if descriptor not in removed_descriptors
-            ]
+            records=sorted(
+                records_by_identity.values(),
+                key=lambda record: (record.fqdn, record.record_type, record.record_id or ""),
+            )
         )
 
 

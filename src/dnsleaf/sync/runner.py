@@ -20,7 +20,7 @@ from dnsleaf.dns.models import DesiredRecord, DNSRecord, SyncPlan, cloudflare_ef
 from dnsleaf.dns.planner import plan_dns_changes
 from dnsleaf.models import EntrySourceKind, IPAddressFamily, TargetKind, TargetRef
 from dnsleaf.workspace.models import ManagedRecordFile, ManagedRecordSnapshot, WorkspaceEntry
-from dnsleaf.workspace.state import stale_records_for_desired
+from dnsleaf.workspace.state import enabled_dns_targets, stale_records_for_desired
 from dnsleaf.workspace.storage import LoadedWorkspace
 
 
@@ -168,6 +168,7 @@ class SyncRunner:
     ) -> WorkspaceRunReport:
         """Plan and optionally apply one workspace run."""
 
+        desired_targets = set(enabled_dns_targets(loaded.entries_file))
         provider = self._provider_factory(loaded)
         record_outcomes = [
             outcome
@@ -177,14 +178,9 @@ class SyncRunner:
 
         prune_outcomes: list[PruneOutcome] = []
         if prune_managed:
-            enabled_descriptors = {
-                descriptor
-                for entry in loaded.entries_file.enabled_entries()
-                for descriptor in entry.descriptors()
-            }
             for record in stale_records_for_desired(
                 managed_state,
-                enabled_descriptors=enabled_descriptors,
+                desired_targets=desired_targets,
             ):
                 prune_outcomes.append(self._plan_prune(provider, record))
 

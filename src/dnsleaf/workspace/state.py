@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 
-from dnsleaf.workspace.models import LastApplyState, ManagedRecordFile, ManagedRecordSnapshot
+from dnsleaf.workspace.models import (
+    EntriesFile,
+    LastApplyState,
+    ManagedRecordFile,
+    ManagedRecordSnapshot,
+)
 from dnsleaf.workspace.storage import WorkspacePaths, dump_json_data
 
 
@@ -46,15 +51,31 @@ def managed_record_counts(state: ManagedRecordFile) -> tuple[int, int]:
     return active, stale
 
 
+def dns_target(fqdn: str, record_type: str) -> tuple[str, str]:
+    """Identify a DNS target within the workspace's configured zone."""
+
+    return fqdn.strip().rstrip(".").lower(), record_type.strip().upper()
+
+
+def enabled_dns_targets(entries: EntriesFile) -> dict[tuple[str, str], str]:
+    """Map configured targets to entry labels, independently of discovery results."""
+
+    return {
+        dns_target(entry.fqdn, family.record_type): entry.name
+        for entry in entries.enabled_entries()
+        for family in entry.concrete_families()
+    }
+
+
 def stale_records_for_desired(
     state: ManagedRecordFile,
     *,
-    enabled_descriptors: set[str],
+    desired_targets: set[tuple[str, str]],
 ) -> list[ManagedRecordSnapshot]:
     """Return managed records that are no longer desired by enabled entries."""
 
     return [
         record
         for record in state.records
-        if record.state == "stale" or record.descriptor not in enabled_descriptors
+        if dns_target(record.fqdn, record.record_type) not in desired_targets
     ]

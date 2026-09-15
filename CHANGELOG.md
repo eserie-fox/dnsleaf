@@ -11,6 +11,8 @@
   arguments correctly. Uninstall stops the timer first and reports essential cleanup failures.
 - Fixed normal sync to reject multiple remote records of the same name/type without deleting extras.
 - Retained managed-only prune, per-family safety, proxy preservation, and thin package interfaces.
+- Fixed prune safety for re-enabled or renamed entries: configured DNS targets remain protected
+  regardless of discovery results, and ownership is reconciled without conflicting stale aliases.
 - Private installations require a fresh workspace after separate uninstall, without compatibility migration.
 
 See [1.1.0 notes](docs/release-notes/1.1.0.md) and [release gates](docs/release.md).

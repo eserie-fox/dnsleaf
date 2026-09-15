@@ -84,6 +84,11 @@ This explicit empty list preserves remote records when pruning is disabled. With
 pruning enabled, previously tracked records are eligible for deletion; untracked records remain
 untouched. `init` generates this valid empty-list form from the packaged defaults.
 
+An enabled entry protects its normalized FQDN and record type from pruning, even if historical state
+is stale or discovery cannot select an address. Renaming an entry keeps ownership of its existing
+remote record. Removing a target or disabling its entry can make it eligible for pruning; changing
+a dual-stack entry to IPv4-only retires only its AAAA target. See [DNS sync](dns_sync.md#prune-behavior).
+
 See [entry management](entry_management.md) for CLI examples and the complete source shapes.
 `source_kind` is `lxc`, `vm`, `local`, or `static`; `family` is `ipv4`, `ipv6`, or `both`.
 Names must be unique. Dynamic entries require `selection_policy`; guest entries also need `source_id`.

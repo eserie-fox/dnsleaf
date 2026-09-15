@@ -86,10 +86,22 @@ Prune is disabled by default.
 When enabled, prune only targets records that:
 
 - were previously tracked in `state/managed-records.json`
-- are no longer part of the current desired workspace state
+- have a DNS target (case-insensitive FQDN without its trailing dot, plus record type) that no
+  enabled entry currently configures
 - still have a usable `record_id`
 
 Untracked zone records are never deleted by prune.
+
+Current configured targets take precedence over cached `stale` state and entry labels. Re-enabling
+or renaming an entry does not authorize deletion of a still-desired record. Protection does not
+depend on successful address discovery or provider planning: unavailable, ambiguous, or failed
+discovery preserves the target. IPv4 and IPv6 are independent; changing `both` to `ipv4` can retire
+the tracked AAAA record while protecting A.
+
+After applied synchronization, ownership follows the current entry label and remote record ID,
+without keeping conflicting stale aliases of that record. A retained record keeps its original
+ownership timestamp. An explicit empty entries list still allows intentional tracked-record pruning;
+incomplete entries documents fail validation before planning.
 
 ## Ambiguous remote records
 
