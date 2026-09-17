@@ -7,7 +7,7 @@ Each entry publishes IPv4, IPv6, or both from a PVE LXC guest, a PVE VM guest ag
 the local host, or explicit static addresses. A oneshot sync and a system-level systemd timer
 handle periodic updates. Cloudflare is the only supported provider.
 
-**1.1.0 is pending release.** The public PyPI installation commands below apply after publication.
+**1.2.0 is pending release.** The public PyPI installation commands below apply after publication.
 Before publication, install the reviewed wheel with the same `uv tool install` command.
 
 ## Install the Python tool
@@ -23,7 +23,7 @@ DNSLEAF="$(uv tool dir --bin)/dnsleaf"
 ```
 
 For pre-release review, replace `dnsleaf` in the install command with the absolute path to
-`dnsleaf-1.1.0-py3-none-any.whl`. Installing the package creates a CLI; it does not install a timer
+`dnsleaf-1.2.0-py3-none-any.whl`. Installing the package creates a CLI; it does not install a timer
 or synchronize DNS. Keep this tool environment and its Python interpreter installed for the timer.
 The module entrypoint is `python -m dnsleaf` when that Python environment contains the package.
 
@@ -67,8 +67,25 @@ Add entries with the CLI, or edit `entries.yaml` (schema 2):
 ```
 
 These names, guest IDs, and static documentation addresses are placeholders: use your own values.
-LXC discovery uses `pct exec`; VM discovery needs a working QEMU guest agent; local discovery uses
+LXC discovery uses `pct exec`; VM discovery supports Linux and Windows through a working standard QEMU guest agent; local discovery uses
 `ip`. See [discovery](docs/discovery.md) and [entry management](docs/entry_management.md).
+
+## Find an existing workspace
+
+Existing dnsleaf deployments keep their directories and YAML; 1.2.0 requires no relocation or
+reinitialization. Select with `--workspace` / `-w` (including explicit `.`), then a non-empty
+`DNSLEAF_WORKSPACE`, or let dnsleaf search automatically. Automatic bases are the current directory,
+its ancestors nearest to farthest including `/`, then home if not already visited. Each base checks
+its immediate child directories in lexicographic order **before the base itself**. The first directory
+with readable regular `workspace.yaml` and `entries.yaml` files wins; there is no sibling ambiguity error.
+
+Search is one level only. From a home containing `ddns-config/` and
+`dnsleaf-backups/backup-2026-09-17/`, the nested backup is not inspected. A complete backup placed
+directly among searched siblings is a normal candidate; use `--workspace` to choose a particular one.
+
+Partial candidates warn on stderr and search continues. A complete candidate with invalid YAML,
+schema, or relevant runtime references fails without fallback. Explicit paths and environment paths
+are authoritative. See [configuration](docs/configuration.md#workspace-discovery) for diagnostics.
 
 ## Validate, plan, and synchronize
 
@@ -85,6 +102,9 @@ LXC discovery uses `pct exec`; VM discovery needs a working QEMU guest agent; lo
 IPv4 and IPv6 are handled independently. Missing or ambiguous addresses are skipped without
 publishing guesses or deleting existing records. `default_ttl: auto` uses Cloudflare automatic TTL;
 `default_proxied: null` preserves existing proxy settings. Entry overrides may set `true` or `false`.
+Enabled entries must own distinct FQDN + record type targets (case and trailing dots are ignored).
+Each sync queries a dynamic source once, sharing its raw snapshot across node/service names and
+families. Address-discovery commands have a package-default 30-second timeout.
 Prune is off by default; explicit `--prune-managed` only removes stale records tracked by this
 workspace. Unmanaged zone records are preserved. See [DNS sync](docs/dns_sync.md).
 
@@ -133,8 +153,8 @@ uv tool uninstall dnsleaf
 Repeat local service removal for every installed workspace before removing the tool environment.
 Normal `uninstall` retains configuration, credentials, and state. To explicitly delete a workspace,
 use `uninstall --purge` while the tool is still installed. Neither form deletes remote DNS records.
-A stop/disable failure aborts cleanup and returns failure. Earlier private deployments must be
-uninstalled separately and configured afresh; no in-place compatibility migration is provided.
+A stop/disable failure aborts cleanup and returns failure. Historical pre-dnsleaf private deployments had separate migration requirements; existing dnsleaf
+workspace schema 4 / entries schema 2 deployments need no reinitialization for 1.2.0.
 
 ## Development and release
 
@@ -145,5 +165,5 @@ make build
 ```
 
 See [development](docs/development.md), [architecture](docs/architecture.md),
-[release preparation](docs/release.md), [1.1.0 notes](docs/release-notes/1.1.0.md), and
+[release preparation](docs/release.md), [1.2.0 notes](docs/release-notes/1.2.0.md), and
 [CHANGELOG](CHANGELOG.md). Author: eserie-fox. License: [MIT](LICENSE).

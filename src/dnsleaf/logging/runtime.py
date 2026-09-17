@@ -190,7 +190,7 @@ def load_workspace_logging_config(
         format=logging_config.format,
         file_path=file_path,
         retention_days=logging_config.retention_days,
-        stream=logging_config.stream,
+        stream="stderr" if logging_config.stream == "stdout" else logging_config.stream,
     )
 
 

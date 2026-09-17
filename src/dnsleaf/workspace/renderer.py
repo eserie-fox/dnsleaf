@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dnsleaf.systemd import SystemdManager
-from dnsleaf.workspace.models import DesiredRecordSpec, RenderArtifacts
+from dnsleaf.workspace.reports import DesiredRecordSpec, RenderArtifacts
 from dnsleaf.workspace.storage import LoadedWorkspace, atomic_write_text, dump_json_data
 
 

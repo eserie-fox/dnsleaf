@@ -8,7 +8,8 @@ The runtime flow is:
 
 More explicitly:
 
-1. `workspace.yaml` and `entries.yaml` are loaded from a workspace directory.
+1. The locator selects the first complete workspace; its `workspace.yaml` and `entries.yaml` are
+   loaded once for logging and execution. Explicit roots remain authoritative.
 2. Dynamic entries use discovery backends to gather IPv4 and IPv6 candidates from PVE guests or the local host.
 3. The selector chooses one family-specific address or returns an explicit non-selection result.
 4. Static entries bypass discovery and selection entirely.
@@ -23,6 +24,7 @@ More explicitly:
   - manages entry CRUD
   - renders derived artifacts
   - aggregates status and doctor output
+  - separates operation DTOs in `reports.py` and deterministic ownership reconciliation in `state.py`
 - `dnsleaf.discovery`
   - collects IPv4 and IPv6 candidate addresses from dynamic targets
   - contains family-specific selection logic
@@ -33,6 +35,7 @@ More explicitly:
 - `dnsleaf.sync`
   - performs thin orchestration for `plan` and `sync-once`
   - expands one entry into one or two concrete record flows
+  - shares one raw address snapshot per distinct dynamic source for one run only
 - `dnsleaf.systemd`
   - renders unit files
   - installs, uninstalls, and queries systemd units

@@ -60,3 +60,9 @@ Normal uninstall keeps `workspace.yaml`, `entries.yaml`, credentials, and `state
 `uninstall --purge` explicitly removes the workspace after service cleanup, with conservative guards
 against deleting broad paths or following generated-directory symlinks outside the workspace.
 Neither operation contacts Cloudflare or deletes remote DNS.
+
+Workspace auto-discovery in 1.2.0 does not change timer behavior. Generated services keep an explicit
+absolute `--workspace` argument and the installing Python environment. They do not depend on
+`DNSLEAF_WORKSPACE` or a shell working directory. Existing dnsleaf units and YAML need no mandatory
+change for this release; keep the bound interpreter available. Reapply when intentionally changing
+installation environments. The discovery timeout does not shorten systemctl lifecycle operations.

@@ -8,8 +8,9 @@ import yaml
 from dnsleaf.discovery.models import AddressCandidate, DiscoveryResult
 from dnsleaf.dns.models import DNSRecord
 from dnsleaf.models import IPAddressFamily, TargetKind
-from dnsleaf.sync.runner import SyncRunner, WorkspaceRunReport
+from dnsleaf.sync.runner import SyncRunner
 from dnsleaf.workspace.entries import EntryService
+from dnsleaf.workspace.reports import WorkspaceRunReport
 from dnsleaf.workspace.service import WorkspaceService
 from dnsleaf.workspace.state import load_managed_records, write_managed_records
 from dnsleaf.workspace.storage import WorkspaceStorage, dump_yaml_data
@@ -20,7 +21,7 @@ def _setup(
     workspace: Path, *, family: str = "ipv4", dynamic: bool = False
 ) -> tuple[WorkspaceService, FakeDNSProvider, FakeDiscoveryBackend]:
     EntryService().add_entry(
-        workspace,
+        WorkspaceStorage().load(workspace),
         name="web",
         source_kind="lxc" if dynamic else "static",
         source_id=101 if dynamic else None,
@@ -48,7 +49,7 @@ def _setup(
             discovery_backends={TargetKind.LXC.value: backend},
         )
     )
-    assert not service.sync_once(workspace, apply=True).has_errors()
+    assert not service.sync_once(WorkspaceStorage().load(workspace), apply=True).has_errors()
     provider.applied_actions.clear()
     return service, provider, backend
 
@@ -62,7 +63,9 @@ def _edit_entry(workspace: Path, **changes) -> None:
 
 def _mark_stale(workspace: Path, service: WorkspaceService) -> None:
     _edit_entry(workspace, enabled=False)
-    assert not service.sync_once(workspace, apply=True, prune_managed=False).has_errors()
+    assert not service.sync_once(
+        WorkspaceStorage().load(workspace), apply=True, prune_managed=False
+    ).has_errors()
     state = load_managed_records(WorkspaceStorage().paths_for(workspace))
     assert all(record.state == "stale" for record in state.records)
 
@@ -95,9 +98,9 @@ def test_desired_target_survives_entry_recovery(workspace_dir: Path, change: str
     before = paths.managed_records_file.read_bytes()
 
     report = (
-        service.sync_once(workspace_dir, apply=True, prune_managed=True)
+        service.sync_once(WorkspaceStorage().load(workspace_dir), apply=True, prune_managed=True)
         if apply
-        else service.plan_workspace(workspace_dir, prune_managed=True)
+        else service.plan_workspace(WorkspaceStorage().load(workspace_dir), prune_managed=True)
     )
     assert "delete" not in provider.applied_actions
     _assert_no_delete_plans(report)
@@ -121,7 +124,9 @@ def test_desired_target_survives_entry_recovery(workspace_dir: Path, change: str
         )
         assert record.first_managed_at == original.first_managed_at
         provider.applied_actions.clear()
-        report = service.sync_once(workspace_dir, apply=True, prune_managed=True)
+        report = service.sync_once(
+            WorkspaceStorage().load(workspace_dir), apply=True, prune_managed=True
+        )
         _assert_no_delete_plans(report)
         assert not report.has_errors()
         assert provider.applied_actions == []
@@ -162,13 +167,15 @@ def test_stale_desired_target_is_protected_without_selected_address(
         ),
     )
     before = paths.managed_records_file.read_bytes()
-    plan = service.plan_workspace(workspace_dir, prune_managed=True)
+    plan = service.plan_workspace(WorkspaceStorage().load(workspace_dir), prune_managed=True)
     _assert_no_delete_plans(plan)
     assert plan.record_outcomes[0].selected_value is None
     assert paths.managed_records_file.read_bytes() == before
 
     for _ in range(2):
-        report = service.sync_once(workspace_dir, apply=True, prune_managed=True)
+        report = service.sync_once(
+            WorkspaceStorage().load(workspace_dir), apply=True, prune_managed=True
+        )
         assert provider.applied_actions == []
         _assert_no_delete_plans(report)
         assert report.record_outcomes[0].selected_value is None
@@ -209,9 +216,13 @@ def test_normalized_targets_and_duplicate_ownership_are_reconciled(
         "list_records",
         lambda name, record_type=None: list_records(name.rstrip(".").lower(), record_type),
     )
-    _assert_no_delete_plans(service.plan_workspace(workspace_dir, prune_managed=True))
+    _assert_no_delete_plans(
+        service.plan_workspace(WorkspaceStorage().load(workspace_dir), prune_managed=True)
+    )
     for _ in range(2):
-        report = service.sync_once(workspace_dir, apply=True, prune_managed=True)
+        report = service.sync_once(
+            WorkspaceStorage().load(workspace_dir), apply=True, prune_managed=True
+        )
         _assert_no_delete_plans(report)
         assert provider.applied_actions == []
         records = load_managed_records(paths).records
@@ -235,11 +246,13 @@ def test_desired_target_is_protected_when_provider_planning_fails(workspace_dir:
     with monkeypatch.context() as patch:
         patch.setattr(provider, "list_records", failed_listing)
         before = paths.managed_records_file.read_bytes()
-        plan = service.plan_workspace(workspace_dir, prune_managed=True)
+        plan = service.plan_workspace(WorkspaceStorage().load(workspace_dir), prune_managed=True)
         assert plan.has_errors()
         _assert_no_delete_plans(plan)
         assert paths.managed_records_file.read_bytes() == before
-        report = service.sync_once(workspace_dir, apply=True, prune_managed=True)
+        report = service.sync_once(
+            WorkspaceStorage().load(workspace_dir), apply=True, prune_managed=True
+        )
         assert report.has_errors()
         _assert_no_delete_plans(report)
         assert provider.applied_actions == []
@@ -261,18 +274,20 @@ def test_prune_retires_only_no_longer_desired_tracked_targets(workspace_dir: Pat
     original = {r.record_type: r for r in load_managed_records(paths).records}
     untracked = provider.list_records("untracked.example.com")
     if retire == "all":
-        EntryService().remove_entry(workspace_dir, name="web")
+        EntryService().remove_entry(WorkspaceStorage().load(workspace_dir), name="web")
         retired_types = {"A", "AAAA"}
     else:
         _mark_stale(workspace_dir, service)
         _edit_entry(workspace_dir, enabled=True, name="frontend", family="ipv4", static_ipv6=None)
         retired_types = {"AAAA"}
     before = paths.managed_records_file.read_bytes()
-    plan = service.plan_workspace(workspace_dir, prune_managed=True)
+    plan = service.plan_workspace(WorkspaceStorage().load(workspace_dir), prune_managed=True)
     assert {outcome.record_type for outcome in plan.prune_outcomes} == retired_types
     assert provider.applied_actions == []
     assert paths.managed_records_file.read_bytes() == before
-    report = service.sync_once(workspace_dir, apply=True, prune_managed=True)
+    report = service.sync_once(
+        WorkspaceStorage().load(workspace_dir), apply=True, prune_managed=True
+    )
     assert not report.has_errors()
     assert provider.applied_actions == ["delete"] * len(retired_types)
     assert all(outcome.applied for outcome in report.prune_outcomes)

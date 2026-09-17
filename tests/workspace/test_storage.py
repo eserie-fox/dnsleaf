@@ -8,7 +8,7 @@ import yaml
 
 from dnsleaf.workspace.models import EntriesFile, WorkspaceConfig
 from dnsleaf.workspace.service import WorkspaceService
-from dnsleaf.workspace.storage import WorkspaceInitError, WorkspaceStorage
+from dnsleaf.workspace.storage import WorkspaceInitError, WorkspaceLoadError, WorkspaceStorage
 
 
 def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ def test_init_rejects_existing_non_empty_directory(tmp_path: Path) -> None:
 
 
 def test_validate_resolves_relative_token_file(workspace_dir: Path) -> None:
-    report = WorkspaceService().validate_workspace(workspace_dir)
+    report = WorkspaceService().validate_workspace(WorkspaceStorage().load(workspace_dir))
 
     assert report.workspace_name == "lab"
     assert report.token_file.endswith("secrets/cloudflare_api_token.txt")
@@ -88,8 +88,8 @@ def test_validate_rejects_old_workspace_schema_version(workspace_dir: Path) -> N
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="config_version must be exactly 4"):
-        WorkspaceService().validate_workspace(workspace_dir)
+    with pytest.raises(WorkspaceLoadError, match="config_version must be exactly 4"):
+        WorkspaceService().validate_workspace(WorkspaceStorage().load(workspace_dir))
 
 
 def test_validate_resolves_relative_systemd_unit_dir(workspace_dir: Path) -> None:
@@ -124,8 +124,8 @@ def test_validate_rejects_old_record_type_entry_schema(workspace_dir: Path) -> N
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="family|record_type|Field required|Extra inputs"):
-        WorkspaceService().validate_workspace(workspace_dir)
+    with pytest.raises(WorkspaceLoadError, match="family|record_type|Field required|Extra inputs"):
+        WorkspaceService().validate_workspace(WorkspaceStorage().load(workspace_dir))
 
 
 def test_validate_rejects_static_entry_without_matching_values(workspace_dir: Path) -> None:
@@ -143,8 +143,8 @@ def test_validate_rejects_static_entry_without_matching_values(workspace_dir: Pa
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="static_ipv4 is required"):
-        WorkspaceService().validate_workspace(workspace_dir)
+    with pytest.raises(WorkspaceLoadError, match="static_ipv4 is required"):
+        WorkspaceService().validate_workspace(WorkspaceStorage().load(workspace_dir))
 
 
 def test_render_generates_effective_workspace_and_systemd_artifacts(workspace_dir: Path) -> None:
@@ -163,7 +163,7 @@ def test_render_generates_effective_workspace_and_systemd_artifacts(workspace_di
         encoding="utf-8",
     )
 
-    report = WorkspaceService().render_workspace(workspace_dir)
+    report = WorkspaceService().render_workspace(WorkspaceStorage().load(workspace_dir))
 
     effective = json.loads(Path(report.effective_workspace_file).read_text(encoding="utf-8"))
     desired = json.loads(Path(report.desired_records_file).read_text(encoding="utf-8"))

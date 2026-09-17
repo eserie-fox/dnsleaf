@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -63,7 +62,7 @@ def _managed_service(workspace_dir: Path) -> tuple[WorkspaceService, FakeDNSProv
     """Seed real managed state using a static entry and a mutation-tracking fake."""
 
     EntryService().add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         source_kind="static",
         fqdn="host.example.com",
@@ -85,7 +84,7 @@ def _managed_service(workspace_dir: Path) -> tuple[WorkspaceService, FakeDNSProv
     )
     provider_factory = Mock(return_value=provider)
     service = WorkspaceService(runner=SyncRunner(provider_factory=provider_factory))
-    report = service.sync_once(workspace_dir, apply=True)
+    report = service.sync_once(WorkspaceStorage().load(workspace_dir), apply=True)
     assert not report.has_errors()
     assert provider.applied_actions == ["create"]
     paths = WorkspaceStorage().paths_for(workspace_dir)
@@ -113,10 +112,10 @@ def test_invalid_entries_fail_public_loading_paths_before_planning(
     for operation in (
         storage.load,
         storage.validate,
-        service.validate_workspace,
-        service.plan_workspace,
-        partial(service.sync_once, apply=False),
-        partial(service.sync_once, apply=True),
+        lambda path: service.validate_workspace(storage.load(path)),
+        lambda path: service.plan_workspace(storage.load(path)),
+        lambda path: service.sync_once(storage.load(path), apply=False),
+        lambda path: service.sync_once(storage.load(path), apply=True),
     ):
         with pytest.raises((ValueError, WorkspaceLoadError)):
             operation(workspace_dir)
@@ -143,9 +142,11 @@ def test_explicit_empty_entries_preserve_intentional_pruning(
 
     assert EntriesFile.from_file(paths.entries_file).entries == []
     assert WorkspaceStorage().load(workspace_dir).entries_file.entries == []
-    assert service.validate_workspace(workspace_dir).entry_count == 0
+    assert service.validate_workspace(WorkspaceStorage().load(workspace_dir)).entry_count == 0
 
-    plan = service.plan_workspace(workspace_dir, prune_managed=prune_managed)
+    plan = service.plan_workspace(
+        WorkspaceStorage().load(workspace_dir), prune_managed=prune_managed
+    )
     assert not plan.has_errors()
     assert plan.dry_run is True
     assert len(plan.prune_outcomes) == int(prune_managed)
@@ -153,7 +154,9 @@ def test_explicit_empty_entries_preserve_intentional_pruning(
     assert provider.list_records("host.example.com") == original_records
     assert paths.managed_records_file.read_bytes() == original_state
 
-    report = service.sync_once(workspace_dir, apply=True, prune_managed=prune_managed)
+    report = service.sync_once(
+        WorkspaceStorage().load(workspace_dir), apply=True, prune_managed=prune_managed
+    )
     assert not report.has_errors()
     assert report.record_outcomes == []
     assert provider.list_records("host.example.com", "AAAA") == untracked

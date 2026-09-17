@@ -14,7 +14,8 @@ from dnsleaf.util.process import (
     command_available,
     run_command,
 )
-from dnsleaf.workspace.models import ResolvedWorkspace, SystemdUnitStatus
+from dnsleaf.workspace.models import ResolvedWorkspace
+from dnsleaf.workspace.reports import SystemdUnitStatus
 from dnsleaf.workspace.storage import WorkspacePaths
 
 

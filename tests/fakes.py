@@ -9,7 +9,8 @@ from dnsleaf.dns.models import DNSRecord, PlannedChange, ProviderVerification
 from dnsleaf.models import IPAddressFamily, TargetRef
 from dnsleaf.systemd import SystemdManager
 from dnsleaf.util.process import CommandResult
-from dnsleaf.workspace.models import ResolvedWorkspace, SystemdUnitStatus
+from dnsleaf.workspace.models import ResolvedWorkspace
+from dnsleaf.workspace.reports import SystemdUnitStatus
 from dnsleaf.workspace.storage import WorkspacePaths
 
 
@@ -159,7 +160,9 @@ class FakeSystemdManager(SystemdManager):
         self.installed_units.append((service_path, timer_path))
         return service_path, timer_path
 
-    def daemon_reload(self, workspace: ResolvedWorkspace, *, check: bool = True) -> CommandResult:
+    def daemon_reload(
+        self, workspace: ResolvedWorkspace, *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         _ = workspace
         self.daemon_reloaded = True
         return CommandResult(

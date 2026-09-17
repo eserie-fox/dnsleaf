@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0 — pending release
+
+- Added explicit CLI / DNSLEAF_WORKSPACE / children-before-base automatic workspace selection.
+- Required only workspace.yaml and entries.yaml for location; partial candidates warn and continue,
+  complete candidates validate strictly without fallback, and inspection failures remain errors.
+- Reused one configuration snapshot per command and one raw discovery result per source per run.
+- Covered Windows Guests with synthetic standard QGA fixtures through the existing VM backend.
+- Added a shared package-default 30-second discovery timeout and unique enabled DNS-target validation.
+- Separated CLI output, report DTOs and deterministic managed-state reconciliation; corrected doctor
+  log-path diagnostics and discovery exit handling while retaining prune, proxy and systemd safety.
+- Kept workspace/entries/state schemas unchanged; existing dnsleaf deployments need no move or reset.
+
+See [1.2.0 notes](docs/release-notes/1.2.0.md). Publication and live-PVE acceptance remain separate.
+
 ## 1.1.0 — pending release
 
 - Unified the project as `dnsleaf` (repository, PyPI distribution, package, CLI, and module entry).

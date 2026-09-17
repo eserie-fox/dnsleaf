@@ -1,6 +1,6 @@
 # Release preparation
 
-Version **1.1.0 is pending release**. These instructions prepare a public package; they do not
+Version **1.2.0 is pending release**. These instructions prepare a public package; they do not
 assert that PyPI projects, publishers, GitHub environments, or branch protection already exist.
 
 ## Identity and build
@@ -69,9 +69,10 @@ Run PVE acceptance separately on an authorized test host: LXC/VM/local discovery
 then intentional writes, timer execution, permission handling, and uninstall failure recovery.
 Local unit tests with fakes do not establish PVE or live Cloudflare acceptance.
 
-Old private installations require uninstalling the old tool separately and creating a new workspace
-and token reference. There is no package alias, command alias, config conversion, state migration,
-or in-place upgrade path. The 1.0.x notes record pre-rename internal work, not public dnsleaf releases.
+The 1.0.x notes record pre-rename private work, whose old-tool migration requirements are historical.
+Existing dnsleaf schema 4 / entries schema 2 / state schema 1 deployments need no configuration
+migration, relocation or reinitialization for 1.2.0. Existing explicit systemd workspace paths remain
+valid. Validate enabled DNS-target uniqueness before syncing after upgrade.
 
 After review and account setup, manually run the TestPyPI workflow. Verify its published artifacts
 before creating the intended PyPI tag. Neither a local build nor this document implies publication.

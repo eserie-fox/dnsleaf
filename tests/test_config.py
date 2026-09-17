@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from dnsleaf.config.merge import deep_merge
 from dnsleaf.config.outside_workspace import OutsideWorkspaceConfig
@@ -111,3 +114,25 @@ def test_yaml_nonmapping_values_and_errors_do_not_leak_input(tmp_path) -> None:
         with pytest.raises(ValueError) as error:
             WorkspaceConfig.from_file(file)
         assert "TEST_ONLY_SECRET" not in str(error.value)
+
+
+def test_discovery_timeout_defaults_overrides_and_validation(tmp_path: Path) -> None:
+    from dnsleaf.config.outside_workspace import OutsideWorkspaceConfig
+    from dnsleaf.config.shared import DiscoveryConfig
+    from dnsleaf.workspace.models import WorkspaceConfig
+
+    assert DiscoveryConfig.from_defaults().timeout_seconds == 30
+    path = tmp_path / "discovery.json"
+    path.write_text('{"timeout_seconds": 12}')
+    assert DiscoveryConfig.from_file(path).timeout_seconds == 12
+    assert WorkspaceConfig.from_defaults().discovery.timeout_seconds == 30
+    assert OutsideWorkspaceConfig.from_defaults().discovery.timeout_seconds == 30
+    assert (
+        WorkspaceConfig.from_mapping({"discovery": {"timeout_seconds": 8}})
+        .resolve(tmp_path)
+        .discovery.timeout_seconds
+        == 8
+    )
+    for value in [0, -1, True, "30", None, float("inf"), float("nan")]:
+        with pytest.raises(ValueError):
+            WorkspaceConfig.from_mapping({"discovery": {"timeout_seconds": value}})

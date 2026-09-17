@@ -9,5 +9,5 @@
 - [systemd lifecycle](systemd.md)
 - [Development rules and checks](development.md)
 - [Release preparation](release.md)
-- [Pending 1.1.0 release notes](release-notes/1.1.0.md)
+- [Pending 1.2.0 release notes](release-notes/1.2.0.md)
 - [Changelog and pre-rename internal history](../CHANGELOG.md)

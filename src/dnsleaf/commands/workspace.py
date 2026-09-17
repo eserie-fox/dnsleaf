@@ -7,7 +7,8 @@ from typing import Annotated
 
 import typer
 
-from dnsleaf.commands import common
+from dnsleaf.commands import common, output
+from dnsleaf.workspace.locator import locate_workspace
 
 
 def register(app: typer.Typer) -> None:
@@ -23,43 +24,45 @@ def register(app: typer.Typer) -> None:
         try:
             created = common.workspace_service(ctx).init_workspace(directory)
         except Exception as exc:
-            common.exit_with_error(exc)
+            output.exit_with_error(exc)
         typer.echo(f"workspace={created}")
 
     @app.command("validate")
     def validate_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
         """Validate a workspace."""
 
         try:
-            with common.workspace_command_logging(ctx, workspace, command_name="validate"):
-                report = common.workspace_service(ctx).validate_workspace(workspace)
+            with common.workspace_command_logging(
+                ctx, workspace, command_name="validate"
+            ) as loaded:
+                report = common.workspace_service(ctx).validate_workspace(loaded)
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_validation_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_validation_report)
 
     @app.command("render")
     def render_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
         """Render workspace artifacts without applying them."""
 
         try:
-            with common.workspace_command_logging(ctx, workspace, command_name="render"):
-                report = common.workspace_service(ctx).render_workspace(workspace)
+            with common.workspace_command_logging(ctx, workspace, command_name="render") as loaded:
+                report = common.workspace_service(ctx).render_workspace(loaded)
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_render_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_render_report)
 
     @app.command("apply")
     def apply_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
         prune_managed: Annotated[
             bool,
@@ -87,22 +90,22 @@ def register(app: typer.Typer) -> None:
         run_sync_override = common.resolve_bool_override(run_sync, no_run_sync, "run-sync")
         try:
             common.require_root("apply")
-            with common.workspace_command_logging(ctx, workspace, command_name="apply"):
+            with common.workspace_command_logging(ctx, workspace, command_name="apply") as loaded:
                 report = common.workspace_service(ctx).apply_workspace(
-                    workspace,
+                    loaded,
                     prune_managed=prune_override,
                     run_sync=run_sync_override,
                 )
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_apply_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_apply_report)
         if report.sync_report is not None and report.sync_report.has_errors():
             raise typer.Exit(code=1)
 
     @app.command("uninstall")
     def uninstall_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
         purge: Annotated[
             bool,
@@ -113,48 +116,50 @@ def register(app: typer.Typer) -> None:
 
         try:
             common.require_root("uninstall")
-            with common.workspace_command_logging(ctx, workspace, command_name="uninstall"):
-                report = common.workspace_service(ctx).uninstall_workspace(workspace, purge=purge)
+            with common.workspace_command_logging(
+                ctx, workspace, command_name="uninstall"
+            ) as loaded:
+                report = common.workspace_service(ctx).uninstall_workspace(loaded, purge=purge)
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_uninstall_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_uninstall_report)
 
     @app.command("status")
     def status_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
         """Show aggregated workspace status."""
 
         try:
-            report = common.workspace_service(ctx).status_workspace(workspace)
+            report = common.workspace_service(ctx).status_workspace(locate_workspace(workspace))
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_status_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_status_report)
         if report.errors:
             raise typer.Exit(code=1)
 
     @app.command("doctor")
     def doctor_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
         """Run non-destructive workspace health checks."""
 
         try:
-            report = common.workspace_service(ctx).doctor_workspace(workspace)
+            report = common.workspace_service(ctx).doctor_workspace(locate_workspace(workspace))
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_doctor_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_doctor_report)
         if not report.ok:
             raise typer.Exit(code=1)
 
     @app.command("plan")
     def plan_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
         prune_managed: Annotated[
             bool,
@@ -169,21 +174,21 @@ def register(app: typer.Typer) -> None:
 
         prune_override = common.resolve_bool_override(prune_managed, no_prune_managed, "prune")
         try:
-            with common.workspace_command_logging(ctx, workspace, command_name="plan"):
+            with common.workspace_command_logging(ctx, workspace, command_name="plan") as loaded:
                 report = common.workspace_service(ctx).plan_workspace(
-                    workspace,
+                    loaded,
                     prune_managed=prune_override,
                 )
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_run_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_run_report)
         if report.has_errors():
             raise typer.Exit(code=1)
 
     @app.command("sync-once")
     def sync_once_command(
         ctx: typer.Context,
-        workspace: Path = common.WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
         apply: Annotated[
             bool,
@@ -203,14 +208,16 @@ def register(app: typer.Typer) -> None:
         prune_override = common.resolve_bool_override(prune_managed, no_prune_managed, "prune")
         try:
             command_name = "sync-once-apply" if apply else "sync-once"
-            with common.workspace_command_logging(ctx, workspace, command_name=command_name):
+            with common.workspace_command_logging(
+                ctx, workspace, command_name=command_name
+            ) as loaded:
                 report = common.workspace_service(ctx).sync_once(
-                    workspace,
+                    loaded,
                     apply=apply,
                     prune_managed=prune_override,
                 )
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
-        common.echo_model_or_text(report, json_output, common.format_run_report)
+            output.exit_with_error(exc, json_output=json_output)
+        output.echo_model_or_text(report, json_output, output.format_run_report)
         if report.has_errors():
             raise typer.Exit(code=1)

@@ -40,14 +40,30 @@ class CommandNotFoundError(RuntimeError):
         self.command = command
 
 
+class CommandTimeoutError(RuntimeError):
+    """The external command exceeded its configured deadline."""
+
+    def __init__(self, args: Sequence[str], timeout: float | None):
+        super().__init__(
+            f"discovery command timed out after {timeout:g} seconds: {' '.join(args)}; "
+            "check command/Guest agent availability or discovery.timeout_seconds"
+            if timeout is not None
+            else f"command timed out: {' '.join(args)}"
+        )
+
+
 class ProcessRunner(Protocol):
     """Callable protocol used by discovery backends for testability."""
 
-    def __call__(self, args: Sequence[str], *, check: bool = True) -> CommandResult:
+    def __call__(
+        self, args: Sequence[str], *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         """Run a command and return captured output."""
 
 
-def run_command(args: Sequence[str], *, check: bool = True) -> CommandResult:
+def run_command(
+    args: Sequence[str], *, check: bool = True, timeout: float | None = None
+) -> CommandResult:
     """Run a command and optionally raise on non-zero exit status."""
 
     try:
@@ -56,7 +72,10 @@ def run_command(args: Sequence[str], *, check: bool = True) -> CommandResult:
             capture_output=True,
             check=False,
             text=True,
+            timeout=timeout,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise CommandTimeoutError(args, timeout) from exc
     except FileNotFoundError as exc:
         raise CommandNotFoundError(str(args[0])) from exc
     result = CommandResult(

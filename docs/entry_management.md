@@ -2,7 +2,8 @@
 
 Operators manage guest targets through `entries.yaml` and the `entry` CLI commands.
 
-All `entry` commands default `--workspace` to the current directory, so `cd <workspace>` is the normal operator path.
+All `entry` commands use explicit `--workspace`, then `DNSLEAF_WORKSPACE`, then the shared
+children-before-base automatic search. Use `-w .` to select the current directory explicitly.
 
 ## Entry schema
 
@@ -122,3 +123,12 @@ To stop dnsleaf from overwriting manual Cloudflare proxy toggles by default:
 - or use `dnsleaf entry update <name> --inherit-proxied` to clear an existing entry-level override
 
 Existing explicit `proxied: true` and `proxied: false` values remain fully managed.
+
+Enabled entries must own unique normalized FQDN + record type targets. Name uniqueness is checked
+separately. Case/trailing-dot differences do not create independent DNS targets. `both` conflicts
+with either overlapping family, while separate A and AAAA entries are allowed. Disabled duplicates
+are allowed until enabled. Add/update/enable validates the full proposed document before writing.
+
+All entry commands use the shared [workspace discovery](configuration.md#workspace-discovery).
+Multiple names can share a VM, including a Windows Guest through standard QGA; discovery is reused
+within one run, with independent family selection and DNS planning for each entry.
