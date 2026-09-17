@@ -10,13 +10,14 @@ from dnsleaf.dns.models import AUTO_TTL
 from dnsleaf.models import EntryAddressFamily, EntrySourceKind, TargetKind
 from dnsleaf.workspace.entries import EntryService
 from dnsleaf.workspace.models import WorkspaceConfig, WorkspaceEntry
+from dnsleaf.workspace.storage import WorkspaceStorage
 
 
 def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Path) -> None:
     service = EntryService()
 
     added = service.add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         source_kind=EntrySourceKind.LXC,
         source_id=101,
@@ -28,12 +29,12 @@ def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Pat
     assert added.entry is not None
     assert added.entry.family.value == "ipv6"
 
-    entries = service.list_entries(workspace_dir)
+    entries = service.list_entries(WorkspaceStorage().load(workspace_dir))
     assert len(entries) == 1
     assert entries[0].name == "web"
 
     updated = service.update_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         fqdn="new.example.com",
         family=EntryAddressFamily.BOTH,
@@ -47,20 +48,20 @@ def test_entry_add_update_enable_disable_remove_dynamic_entry(workspace_dir: Pat
     assert updated.entry.proxied is True
     assert updated.entry.enabled is False
 
-    enabled = service.set_enabled(workspace_dir, name="web", enabled=True)
+    enabled = service.set_enabled(WorkspaceStorage().load(workspace_dir), name="web", enabled=True)
     assert enabled.entry is not None
     assert enabled.entry.enabled is True
 
-    removed = service.remove_entry(workspace_dir, name="web")
+    removed = service.remove_entry(WorkspaceStorage().load(workspace_dir), name="web")
     assert removed.removed_name == "web"
-    assert service.list_entries(workspace_dir) == []
+    assert service.list_entries(WorkspaceStorage().load(workspace_dir)) == []
 
 
 def test_entry_add_and_update_static_entry(workspace_dir: Path) -> None:
     service = EntryService()
 
     added = service.add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="edge",
         source_kind=EntrySourceKind.STATIC,
         fqdn="edge.example.com",
@@ -75,7 +76,7 @@ def test_entry_add_and_update_static_entry(workspace_dir: Path) -> None:
     assert added.entry.static_ipv6 == "2001:4860:abcd:1234::88"
 
     updated = service.update_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="edge",
         family=EntryAddressFamily.IPV4,
         static_ipv4="8.8.8.8",
@@ -90,7 +91,7 @@ def test_entry_add_local_entry(workspace_dir: Path) -> None:
     service = EntryService()
 
     added = service.add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="self",
         source_kind=EntrySourceKind.LOCAL,
         fqdn="self.example.com",
@@ -107,7 +108,7 @@ def test_entry_service_accepts_auto_ttl(workspace_dir: Path) -> None:
     service = EntryService()
 
     added = service.add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         source_kind=EntrySourceKind.LXC,
         source_id=101,
@@ -149,7 +150,7 @@ def test_workspace_entry_effective_ttl_and_proxied_support_auto_and_null() -> No
 def test_entry_update_leaves_existing_proxied_override_when_omitted(workspace_dir: Path) -> None:
     service = EntryService()
     service.add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         source_kind=EntrySourceKind.LXC,
         source_id=101,
@@ -159,7 +160,7 @@ def test_entry_update_leaves_existing_proxied_override_when_omitted(workspace_di
     )
 
     updated = service.update_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         fqdn="new.example.com",
     )
@@ -171,7 +172,7 @@ def test_entry_update_leaves_existing_proxied_override_when_omitted(workspace_di
 def test_entry_update_sets_proxied_false(workspace_dir: Path) -> None:
     service = EntryService()
     service.add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         source_kind=EntrySourceKind.LXC,
         source_id=101,
@@ -181,7 +182,7 @@ def test_entry_update_sets_proxied_false(workspace_dir: Path) -> None:
     )
 
     updated = service.update_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         proxied=False,
     )
@@ -193,7 +194,7 @@ def test_entry_update_sets_proxied_false(workspace_dir: Path) -> None:
 def test_entry_update_can_clear_proxied_override_to_inherit(workspace_dir: Path) -> None:
     service = EntryService()
     service.add_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         source_kind=EntrySourceKind.LXC,
         source_id=101,
@@ -203,11 +204,11 @@ def test_entry_update_can_clear_proxied_override_to_inherit(workspace_dir: Path)
     )
 
     updated = service.update_entry(
-        workspace_dir,
+        WorkspaceStorage().load(workspace_dir),
         name="web",
         inherit_proxied=True,
     )
-    reloaded = service.list_entries(workspace_dir)
+    reloaded = service.list_entries(WorkspaceStorage().load(workspace_dir))
     entries_payload = yaml.safe_load((workspace_dir / "entries.yaml").read_text(encoding="utf-8"))
 
     assert updated.entry is not None

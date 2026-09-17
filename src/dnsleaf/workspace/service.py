@@ -6,60 +6,40 @@ import logging
 import os
 import shlex
 import shutil
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
-
 from dnsleaf.dns.cloudflare import CloudflareDNSProvider
 from dnsleaf.dns.models import ProviderVerification
-from dnsleaf.sync.runner import SyncRunner, WorkspaceRunReport, build_runner
+from dnsleaf.sync.runner import SyncRunner, build_runner
 from dnsleaf.systemd import SystemdError, SystemdManager
 from dnsleaf.util.process import CommandResult, command_available
-from dnsleaf.workspace.models import (
+from dnsleaf.workspace.models import LastApplyState
+from dnsleaf.workspace.renderer import WorkspaceRenderer
+from dnsleaf.workspace.reports import (
+    ApplyReport,
     DoctorCheck,
     DoctorReport,
-    LastApplyState,
-    ManagedRecordFile,
-    ManagedRecordSnapshot,
     RenderArtifacts,
     SystemdUnitStatus,
     UninstallReport,
     ValidationReport,
+    WorkspaceRunReport,
     WorkspaceStatus,
 )
-from dnsleaf.workspace.renderer import WorkspaceRenderer
 from dnsleaf.workspace.state import (
-    dns_target,
-    enabled_dns_targets,
     load_last_apply,
     load_managed_records,
     managed_record_counts,
+    reconcile_managed_state,
     write_last_apply,
     write_managed_records,
 )
 from dnsleaf.workspace.storage import LoadedWorkspace, WorkspaceStorage, ensure_writable_directory
 
 LOGGER = logging.getLogger(__name__)
-
-
-class ApplyReport(BaseModel):
-    """Apply workflow summary."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    workspace_root: str
-    workspace_name: str
-    service_name: str
-    timer_name: str
-    installed_service_unit: str
-    installed_timer_unit: str
-    prune_managed: bool
-    immediate_sync_requested: bool
-    immediate_sync_ran: bool
-    render: RenderArtifacts
-    sync_report: WorkspaceRunReport | None = None
 
 
 class WorkspaceService:
@@ -85,10 +65,10 @@ class WorkspaceService:
         LOGGER.info("workspace_initialized workspace_root=%s", created)
         return created
 
-    def validate_workspace(self, workspace_dir: str | Path) -> ValidationReport:
+    def validate_workspace(self, loaded: LoadedWorkspace) -> ValidationReport:
         """Validate workspace source config and runtime-only references."""
 
-        loaded = self._storage.validate(workspace_dir)
+        self._storage.validate_loaded(loaded)
         LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         report = ValidationReport(
             workspace_root=str(loaded.paths.root),
@@ -108,10 +88,10 @@ class WorkspaceService:
         )
         return report
 
-    def render_workspace(self, workspace_dir: str | Path) -> RenderArtifacts:
+    def render_workspace(self, loaded: LoadedWorkspace) -> RenderArtifacts:
         """Render workspace artifacts."""
 
-        loaded = self._storage.validate(workspace_dir)
+        self._storage.validate_loaded(loaded)
         LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         report = self._renderer.render(loaded)
         LOGGER.info(
@@ -125,13 +105,13 @@ class WorkspaceService:
 
     def plan_workspace(
         self,
-        workspace_dir: str | Path,
+        loaded: LoadedWorkspace,
         *,
         prune_managed: bool | None = None,
     ) -> WorkspaceRunReport:
         """Run a live dry-run plan for a workspace."""
 
-        loaded = self._storage.validate(workspace_dir)
+        self._storage.validate_loaded(loaded)
         LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         managed_state = load_managed_records(loaded.paths)
         try:
@@ -149,14 +129,14 @@ class WorkspaceService:
 
     def sync_once(
         self,
-        workspace_dir: str | Path,
+        loaded: LoadedWorkspace,
         *,
         apply: bool,
         prune_managed: bool | None = None,
     ) -> WorkspaceRunReport:
         """Run one sync cycle for a workspace."""
 
-        loaded = self._storage.validate(workspace_dir)
+        self._storage.validate_loaded(loaded)
         LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         managed_state = load_managed_records(loaded.paths)
         if apply:
@@ -172,7 +152,7 @@ class WorkspaceService:
             LOGGER.exception("sync run failed")
             raise
         if apply:
-            updated_state = self._reconcile_managed_state(loaded, managed_state, report)
+            updated_state = reconcile_managed_state(loaded, managed_state, report, now=_utc_now())
             write_managed_records(loaded.paths, updated_state)
             LOGGER.info("managed_state_updated records=%d", len(updated_state.records))
         self._log_run_report(report)
@@ -180,14 +160,14 @@ class WorkspaceService:
 
     def apply_workspace(
         self,
-        workspace_dir: str | Path,
+        loaded: LoadedWorkspace,
         *,
         prune_managed: bool | None = None,
         run_sync: bool | None = None,
     ) -> ApplyReport:
         """Validate, render, install/update systemd units, and optionally sync once."""
 
-        loaded = self._storage.validate(workspace_dir)
+        self._storage.validate_loaded(loaded)
         ensure_writable_directory(loaded.paths.state_dir)
         LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         render_report = self._renderer.render(loaded)
@@ -214,7 +194,7 @@ class WorkspaceService:
         sync_report: WorkspaceRunReport | None = None
         if immediate_sync_requested:
             sync_report = self.sync_once(
-                loaded.paths.root,
+                loaded,
                 apply=True,
                 prune_managed=self._resolve_prune_managed(loaded, prune_managed),
             )
@@ -254,10 +234,10 @@ class WorkspaceService:
         )
         return report
 
-    def provider_verify(self, workspace_dir: str | Path) -> ProviderVerification:
+    def provider_verify(self, loaded: LoadedWorkspace) -> ProviderVerification:
         """Verify Cloudflare token, zone lookup, and DNS listing access."""
 
-        loaded = self._storage.validate(workspace_dir)
+        self._storage.validate_loaded(loaded)
         LOGGER.info("command_started workspace_root=%s", loaded.paths.root)
         provider = CloudflareDNSProvider(loaded.resolved_workspace.cloudflare_provider_config())
         try:
@@ -291,7 +271,7 @@ class WorkspaceService:
         loaded: LoadedWorkspace | None = None
 
         paths = self._storage.paths_for(workspace_dir)
-        resolved_log_file = paths.runtime_log_file
+        resolved_log_file: Path | None = paths.runtime_log_file
         try:
             loaded = self._storage.load(workspace_dir)
             workspace_name = loaded.resolved_workspace.workspace_name
@@ -304,16 +284,21 @@ class WorkspaceService:
             enabled_entry_count = len(loaded.entries_file.enabled_entries())
             service_name = loaded.resolved_workspace.systemd.service_name
             timer_name = loaded.resolved_workspace.systemd.timer_name
-            resolved_log_file = _resolved_workspace_log_file(
-                loaded,
-                fallback=paths.runtime_log_file,
-            )
+            resolved_log_file = loaded.resolved_workspace.dnsleaf_logging.resolved_file_path()
         except Exception as exc:
             errors.append(str(exc))
 
-        managed_state = load_managed_records(paths)
-        active_count, stale_count = managed_record_counts(managed_state)
-        last_apply = load_last_apply(paths)
+        active_count, stale_count = 0, 0
+        last_apply = None
+        try:
+            managed_state = load_managed_records(paths)
+            active_count, stale_count = managed_record_counts(managed_state)
+        except (ValueError, OSError) as exc:
+            errors.append(f"managed state {paths.managed_records_file}: {exc}")
+        try:
+            last_apply = load_last_apply(paths)
+        except (ValueError, OSError) as exc:
+            errors.append(f"last apply state {paths.last_apply_file}: {exc}")
         if loaded is None:
             service_status = _unavailable_unit_status(service_name, "service")
             timer_status = _unavailable_unit_status(timer_name, "timer")
@@ -346,9 +331,13 @@ class WorkspaceService:
                 "timer_unit": (paths.rendered_systemd_dir / f"{timer_name}.timer").exists(),
             },
             runtime_dir_exists=paths.runtime_dir.exists(),
-            runtime_log_file=str(resolved_log_file),
-            runtime_log_file_exists=_path_exists_or_symlink(resolved_log_file),
-            runtime_log_symlink_target=_symlink_target(resolved_log_file),
+            runtime_log_file=str(resolved_log_file) if resolved_log_file is not None else None,
+            runtime_log_file_exists=(
+                resolved_log_file is not None and _path_exists_or_symlink(resolved_log_file)
+            ),
+            runtime_log_symlink_target=(
+                _symlink_target(resolved_log_file) if resolved_log_file is not None else None
+            ),
             managed_active_count=active_count,
             managed_stale_count=stale_count,
             last_apply=last_apply,
@@ -455,19 +444,17 @@ class WorkspaceService:
                 message=f"runtime logs dir: {paths.runtime_logs_dir}",
             )
         )
+        log_file = loaded.resolved_workspace.dnsleaf_logging.resolved_file_path()
         checks.append(
             DoctorCheck(
                 name="runtime_log_target",
-                status=(
-                    "ok"
-                    if _path_write_target_available(
-                        _resolved_workspace_log_file(loaded, fallback=paths.runtime_log_file)
-                    )
-                    else "warn"
-                ),
+                status="ok"
+                if log_file is None or _path_write_target_available(log_file)
+                else "warn",
                 message=(
-                    "runtime log file: "
-                    f"{_resolved_workspace_log_file(loaded, fallback=paths.runtime_log_file)}"
+                    "file logging is disabled"
+                    if log_file is None
+                    else f"runtime log permission diagnostic (not a write guarantee): {log_file}"
                 ),
             )
         )
@@ -485,13 +472,12 @@ class WorkspaceService:
 
     def uninstall_workspace(
         self,
-        workspace_dir: str | Path,
+        loaded: LoadedWorkspace,
         *,
         purge: bool = False,
     ) -> UninstallReport:
         """Remove installed units and generated runtime artifacts for a workspace."""
 
-        loaded = self._storage.load(workspace_dir)
         if purge:
             _assert_safe_delete_path(
                 loaded.paths.root,
@@ -707,87 +693,6 @@ class WorkspaceService:
         for warning in report.warnings:
             LOGGER.warning("warning=%s", warning)
 
-    def _reconcile_managed_state(
-        self,
-        loaded: LoadedWorkspace,
-        state: ManagedRecordFile,
-        report: WorkspaceRunReport,
-    ) -> ManagedRecordFile:
-        desired_targets = enabled_dns_targets(loaded.entries_file)
-        records_by_identity: dict[tuple[str, str, str | None], ManagedRecordSnapshot] = {}
-        now = _utc_now()
-
-        # Keep the newest observation for duplicate snapshots of one remote record,
-        # while preserving its first ownership timestamp and current configured label.
-        for record in sorted(state.records, key=lambda item: item.last_seen_at):
-            target = dns_target(record.fqdn, record.record_type)
-            identity = (*target, record.record_id)
-            existing = records_by_identity.get(identity)
-            records_by_identity[identity] = record.model_copy(
-                update={
-                    "fqdn": target[0],
-                    "record_type": target[1],
-                    "entry_name": desired_targets.get(target, record.entry_name),
-                    "state": "active" if target in desired_targets else "stale",
-                    "first_managed_at": min(existing.first_managed_at, record.first_managed_at)
-                    if existing is not None
-                    else record.first_managed_at,
-                    "last_seen_at": now,
-                }
-            )
-
-        for outcome in report.record_outcomes:
-            if outcome.final_record is None:
-                continue
-            target = dns_target(outcome.fqdn, outcome.record_type)
-            record_id = outcome.final_record.record_id
-            matching = [
-                identity
-                for identity in records_by_identity
-                if identity[:2] == target or (record_id is not None and identity[2] == record_id)
-            ]
-            first_managed_at = min(
-                (
-                    records_by_identity[identity].first_managed_at
-                    for identity in matching
-                    if identity[2] == record_id
-                ),
-                default=now,
-            )
-            # Successful normal sync establishes the current single record for this
-            # target. Replace obsolete snapshots, including aliases of the same ID.
-            for identity in matching:
-                del records_by_identity[identity]
-            records_by_identity[(*target, record_id)] = ManagedRecordSnapshot(
-                workspace_name=loaded.resolved_workspace.workspace_name,
-                entry_name=desired_targets[target],
-                fqdn=target[0],
-                record_type=target[1],
-                record_id=record_id,
-                value=outcome.final_record.value,
-                ttl=outcome.final_record.ttl,
-                proxied=outcome.final_record.proxied,
-                state="active",
-                first_managed_at=first_managed_at,
-                last_seen_at=now,
-            )
-
-        for prune_outcome in report.prune_outcomes:
-            if prune_outcome.status not in {"applied", "confirmed_absent"}:
-                continue
-            identity = (
-                *dns_target(prune_outcome.fqdn, prune_outcome.record_type),
-                prune_outcome.record_id,
-            )
-            records_by_identity.pop(identity, None)
-
-        return ManagedRecordFile(
-            records=sorted(
-                records_by_identity.values(),
-                key=lambda record: (record.fqdn, record.record_type, record.record_id or ""),
-            )
-        )
-
 
 _DANGEROUS_DELETE_PATHS = {
     Path("/"),
@@ -864,13 +769,21 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 
 def _path_write_target_available(path: Path) -> bool:
-    target = path if path.exists() else path.parent
-    return target.exists() and target.is_dir() and os.access(target, os.W_OK)
+    """Read-only permission diagnostic for regular files, symlinks and missing files."""
 
-
-def _resolved_workspace_log_file(loaded: LoadedWorkspace, *, fallback: Path) -> Path:
-    resolved = loaded.resolved_workspace.dnsleaf_logging.resolved_file_path()
-    return resolved if resolved is not None else fallback
+    try:
+        # The stable symlink must be replaceable as daily logging rotates.
+        if path.is_symlink():
+            if not os.access(path.parent, os.W_OK | os.X_OK):
+                return False
+            path = path.resolve()
+        try:
+            mode = path.stat().st_mode
+        except FileNotFoundError:
+            return path.parent.is_dir() and os.access(path.parent, os.W_OK | os.X_OK)
+        return stat.S_ISREG(mode) and os.access(path, os.W_OK) and os.access(path.parent, os.X_OK)
+    except (OSError, RuntimeError):
+        return False
 
 
 def _unavailable_unit_status(unit_name: str, unit_kind: str) -> SystemdUnitStatus:

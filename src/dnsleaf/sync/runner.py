@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from dnsleaf.config.outside_workspace import OutsideWorkspaceConfig
 from dnsleaf.discovery.base import DiscoveryBackend
 from dnsleaf.discovery.local_ip import LocalIPDiscoveryBackend
@@ -16,73 +14,13 @@ from dnsleaf.discovery.pve_qga import PVEQGADiscoveryBackend
 from dnsleaf.discovery.selectors import select_address
 from dnsleaf.dns.base import DNSProvider
 from dnsleaf.dns.cloudflare import CloudflareDNSProvider
-from dnsleaf.dns.models import DesiredRecord, DNSRecord, SyncPlan, cloudflare_effective_ttl
+from dnsleaf.dns.models import DesiredRecord, cloudflare_effective_ttl
 from dnsleaf.dns.planner import plan_dns_changes
 from dnsleaf.models import EntrySourceKind, IPAddressFamily, TargetKind, TargetRef
 from dnsleaf.workspace.models import ManagedRecordFile, ManagedRecordSnapshot, WorkspaceEntry
+from dnsleaf.workspace.reports import PruneOutcome, RecordSyncOutcome, WorkspaceRunReport
 from dnsleaf.workspace.state import enabled_dns_targets, stale_records_for_desired
 from dnsleaf.workspace.storage import LoadedWorkspace
-
-
-class RecordSyncOutcome(BaseModel):
-    """Outcome for one concrete record managed by a workspace entry."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    entry_name: str
-    source_kind: EntrySourceKind
-    source_id: int | None
-    family: IPAddressFamily
-    fqdn: str
-    record_type: str
-    value_source: Literal["dynamic", "static"]
-    discovery: DiscoveryResult | None = None
-    selection: SelectionResult | None = None
-    selection_status: str | None = None
-    selection_reason: str | None = None
-    selected_value: str | None = None
-    desired_record: DesiredRecord | None = None
-    current_records: list[DNSRecord] = Field(default_factory=list)
-    plan: SyncPlan | None = None
-    status: str
-    message: str
-    applied: bool = False
-    final_record: DNSRecord | None = None
-
-
-class PruneOutcome(BaseModel):
-    """Outcome for one managed-record prune candidate."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    entry_name: str
-    fqdn: str
-    record_type: str
-    record_id: str | None = None
-    value: str
-    status: str
-    message: str
-    plan: SyncPlan | None = None
-    applied: bool = False
-
-
-class WorkspaceRunReport(BaseModel):
-    """Collection of concrete record outcomes and prune outcomes."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    workspace_name: str
-    dry_run: bool
-    record_outcomes: list[RecordSyncOutcome] = Field(default_factory=list)
-    prune_outcomes: list[PruneOutcome] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-
-    def has_errors(self) -> bool:
-        """Return whether any record or prune outcome failed."""
-
-        return any(outcome.status == "error" for outcome in self.record_outcomes) or any(
-            outcome.status == "error" for outcome in self.prune_outcomes
-        )
 
 
 class SyncRunner:
@@ -113,20 +51,7 @@ class SyncRunner:
 
         backend = self._backend_for_kind(target.kind, loaded_workspace=loaded_workspace)
         discovery = backend.discover(target)
-        if discovery.error is not None:
-            selection = SelectionResult(
-                target=target,
-                family=family,
-                policy=policy,
-                status="no_candidate",
-                selected=None,
-                remaining_candidates=[],
-                filtered_out=[],
-                not_selected=[],
-                reason=f"discovery failed: {discovery.error}",
-            )
-            return discovery, selection
-        return discovery, select_address(discovery, family=family, policy=policy)
+        return discovery, select_discovered_address(discovery, family=family, policy=policy)
 
     def discover_target_families(
         self,
@@ -140,23 +65,10 @@ class SyncRunner:
 
         backend = self._backend_for_kind(target.kind, loaded_workspace=loaded_workspace)
         discovery = backend.discover(target)
-        selections: dict[IPAddressFamily, SelectionResult] = {}
-        for family in families:
-            if discovery.error is not None:
-                selections[family] = SelectionResult(
-                    target=target,
-                    family=family,
-                    policy=policy,
-                    status="no_candidate",
-                    selected=None,
-                    remaining_candidates=[],
-                    filtered_out=[],
-                    not_selected=[],
-                    reason=f"discovery failed: {discovery.error}",
-                )
-                continue
-            selections[family] = select_address(discovery, family=family, policy=policy)
-        return discovery, selections
+        return discovery, {
+            family: select_discovered_address(discovery, family=family, policy=policy)
+            for family in families
+        }
 
     def run(
         self,
@@ -170,10 +82,11 @@ class SyncRunner:
 
         desired_targets = set(enabled_dns_targets(loaded.entries_file))
         provider = self._provider_factory(loaded)
+        discoveries: dict[tuple[EntrySourceKind, int | None], DiscoveryResult] = {}
         record_outcomes = [
             outcome
             for entry in loaded.entries_file.enabled_entries()
-            for outcome in self._plan_entry_records(provider, loaded, entry)
+            for outcome in self._plan_entry_records(provider, loaded, entry, discoveries)
         ]
 
         prune_outcomes: list[PruneOutcome] = []
@@ -204,27 +117,34 @@ class SyncRunner:
         provider: DNSProvider,
         loaded: LoadedWorkspace,
         entry: WorkspaceEntry,
+        discoveries: dict[tuple[EntrySourceKind, int | None], DiscoveryResult],
     ) -> list[RecordSyncOutcome]:
         if entry.source_kind is EntrySourceKind.STATIC:
             return [
                 self._plan_static_record(provider, loaded, entry, family)
                 for family in entry.concrete_families()
             ]
-        return self._plan_dynamic_records(provider, loaded, entry)
+        return self._plan_dynamic_records(provider, loaded, entry, discoveries)
 
     def _plan_dynamic_records(
         self,
         provider: DNSProvider,
         loaded: LoadedWorkspace,
         entry: WorkspaceEntry,
+        discoveries: dict[tuple[EntrySourceKind, int | None], DiscoveryResult],
     ) -> list[RecordSyncOutcome]:
         target = entry.to_target_ref()
-        discovery, selections = self.discover_target_families(
-            target,
-            families=entry.concrete_families(),
-            policy=entry.selection_policy or "default",
-            loaded_workspace=loaded,
-        )
+        key = (entry.source_kind, entry.source_id)
+        if key not in discoveries:
+            backend = self._backend_for_kind(target.kind, loaded_workspace=loaded)
+            discoveries[key] = backend.discover(target)
+        discovery = discoveries[key]
+        selections = {
+            family: select_discovered_address(
+                discovery, family=family, policy=entry.selection_policy or "default"
+            )
+            for family in entry.concrete_families()
+        }
         outcomes: list[RecordSyncOutcome] = []
         for family in entry.concrete_families():
             selection = selections[family]
@@ -508,27 +428,36 @@ class SyncRunner:
         *,
         loaded_workspace: LoadedWorkspace | None,
     ) -> DiscoveryBackend:
+        timeout = (
+            loaded_workspace.resolved_workspace.discovery.timeout_seconds
+            if loaded_workspace is not None
+            else self._outside_workspace_config.discovery.timeout_seconds
+        )
         configured = self._discovery_backends.get(kind.value)
         if configured is not None:
             return configured
         if kind is TargetKind.LOCAL:
-            return LocalIPDiscoveryBackend()
+            return LocalIPDiscoveryBackend(timeout_seconds=timeout)
         if kind is TargetKind.LXC:
             if loaded_workspace is not None:
                 return PVELXCDiscoveryBackend(
+                    timeout_seconds=timeout,
                     pct_bin=loaded_workspace.resolved_workspace.paths.pct_bin,
                     shell_bin=loaded_workspace.resolved_workspace.paths.shell_bin,
                 )
             return PVELXCDiscoveryBackend(
+                timeout_seconds=timeout,
                 pct_bin=self._outside_workspace_config.paths.pct_bin,
                 shell_bin=self._outside_workspace_config.paths.shell_bin,
             )
         if kind is TargetKind.VM:
             if loaded_workspace is not None:
                 return PVEQGADiscoveryBackend(
+                    timeout_seconds=timeout,
                     qm_bin=loaded_workspace.resolved_workspace.paths.qm_bin,
                 )
             return PVEQGADiscoveryBackend(
+                timeout_seconds=timeout,
                 qm_bin=self._outside_workspace_config.paths.qm_bin,
             )
         raise KeyError(f"no discovery backend registered for kind {kind.value}")
@@ -549,3 +478,23 @@ def _build_provider(loaded: LoadedWorkspace) -> DNSProvider:
     if loaded.resolved_workspace.provider != "cloudflare":
         raise KeyError(f"unsupported DNS provider: {loaded.resolved_workspace.provider}")
     return CloudflareDNSProvider(loaded.resolved_workspace.cloudflare_provider_config())
+
+
+def select_discovered_address(
+    discovery: DiscoveryResult, *, family: IPAddressFamily, policy: str
+) -> SelectionResult:
+    """Select independently without changing the shared raw discovery snapshot."""
+
+    if discovery.error is not None:
+        return SelectionResult(
+            target=discovery.target,
+            family=family,
+            policy=policy,
+            status="no_candidate",
+            selected=None,
+            remaining_candidates=[],
+            filtered_out=[],
+            not_selected=[],
+            reason=f"discovery failed: {discovery.error}",
+        )
+    return select_address(discovery, family=family, policy=policy)

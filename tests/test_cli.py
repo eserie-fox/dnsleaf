@@ -19,20 +19,21 @@ from dnsleaf.models import (
     SelectedAddress,
     TargetRef,
 )
-from dnsleaf.sync.runner import RecordSyncOutcome, WorkspaceRunReport
 from dnsleaf.version import __version__
-from dnsleaf.workspace.models import (
+from dnsleaf.workspace.models import WorkspaceEntry
+from dnsleaf.workspace.reports import (
+    ApplyReport,
     DoctorCheck,
     DoctorReport,
     EntryMutationResult,
+    RecordSyncOutcome,
     RenderArtifacts,
     SystemdUnitStatus,
     UninstallReport,
     ValidationReport,
-    WorkspaceEntry,
+    WorkspaceRunReport,
     WorkspaceStatus,
 )
-from dnsleaf.workspace.service import ApplyReport
 
 runner = CliRunner()
 
@@ -44,7 +45,7 @@ def _plain_help(output: str) -> str:
 
 
 def _noop_workspace_logging(*args, **kwargs):
-    return nullcontext()
+    return nullcontext(args[1] if args[1] is not None else Path("."))
 
 
 class FakeWorkspaceService:
@@ -651,6 +652,7 @@ def test_validate_defaults_workspace_to_current_directory(monkeypatch, tmp_path:
 
 
 def test_status_reports_runtime_log_fields(monkeypatch) -> None:
+    monkeypatch.setattr("dnsleaf.commands.workspace.locate_workspace", lambda path: path)
     monkeypatch.setattr(common, "workspace_service", lambda ctx: FakeWorkspaceService())
 
     result = runner.invoke(cli.app, ["status", "--workspace", "/tmp/lab"])
@@ -726,7 +728,9 @@ def test_validate_without_workspace_fails_outside_workspace(monkeypatch, tmp_pat
     result = runner.invoke(cli.app, ["validate"])
 
     assert result.exit_code == 1
-    assert result.output == f"error=workspace file not found: {tmp_path / 'workspace.yaml'}\n"
+    assert "Unable to locate a complete dnsleaf workspace" in result.output
+    assert str(tmp_path) in result.output
+    assert "workspace.yaml, entries.yaml" in result.output
 
 
 @pytest.mark.parametrize("color", [False, True], ids=["plain", "color"])
@@ -819,6 +823,7 @@ def test_validate_json_permission_error_returns_json(monkeypatch, tmp_path: Path
 def test_root_callback_uses_outside_workspace_config_and_configures_default_logging(
     monkeypatch,
 ) -> None:
+    monkeypatch.setattr("dnsleaf.commands.workspace.locate_workspace", lambda path: path)
     calls: dict[str, object] = {}
     real_from_defaults = OutsideWorkspaceConfig.from_defaults
 

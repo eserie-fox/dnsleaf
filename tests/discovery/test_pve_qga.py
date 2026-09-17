@@ -34,7 +34,9 @@ def test_pve_qga_backend_parses_network_interfaces() -> None:
         ]
     }
 
-    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
+    def fake_runner(
+        args: Sequence[str], *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         assert args == ["qm", "agent", "201", "network-get-interfaces"]
         return CommandResult(args=tuple(args), returncode=0, stdout=json.dumps(payload), stderr="")
 
@@ -79,7 +81,9 @@ def test_pve_qga_backend_skips_invalid_interfaces_and_address_items(caplog) -> N
         ]
     }
 
-    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
+    def fake_runner(
+        args: Sequence[str], *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         assert args == ["qm", "agent", "201", "network-get-interfaces"]
         return CommandResult(args=tuple(args), returncode=0, stdout=json.dumps(payload), stderr="")
 

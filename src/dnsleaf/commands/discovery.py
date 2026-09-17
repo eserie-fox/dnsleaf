@@ -6,19 +6,10 @@ from pathlib import Path
 
 import typer
 
-from dnsleaf.commands import common
+from dnsleaf.commands import common, output
 from dnsleaf.models import EntryAddressFamily, TargetKind, TargetRef
+from dnsleaf.workspace.locator import WorkspaceNotFoundError, locate_workspace
 from dnsleaf.workspace.storage import LoadedWorkspace, WorkspaceStorage
-
-DISCOVER_WORKSPACE_OPTION = typer.Option(
-    None,
-    "--workspace",
-    "-w",
-    help=(
-        "Optional workspace directory. Defaults to the current directory "
-        "when it is a valid workspace."
-    ),
-)
 
 
 def register(app: typer.Typer) -> None:
@@ -35,13 +26,13 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         target_id: int,
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
-        workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
         """Discover IP candidates for an LXC guest."""
 
         try:
-            _run_discover(
+            exit_code = _run_discover(
                 ctx,
                 TargetKind.LXC,
                 target_id,
@@ -50,20 +41,21 @@ def register(app: typer.Typer) -> None:
                 json_output=json_output,
             )
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
+            output.exit_with_error(exc, json_output=json_output)
+        raise typer.Exit(code=exit_code)
 
     @discover_app.command("vm")
     def discover_vm_command(
         ctx: typer.Context,
         target_id: int,
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
-        workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
         """Discover IP candidates for a VM guest."""
 
         try:
-            _run_discover(
+            exit_code = _run_discover(
                 ctx,
                 TargetKind.VM,
                 target_id,
@@ -72,19 +64,20 @@ def register(app: typer.Typer) -> None:
                 json_output=json_output,
             )
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
+            output.exit_with_error(exc, json_output=json_output)
+        raise typer.Exit(code=exit_code)
 
     @discover_app.command("local")
     def discover_local_command(
         ctx: typer.Context,
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
-        workspace: Path | None = DISCOVER_WORKSPACE_OPTION,
+        workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
         """Discover IP candidates for the local host."""
 
         try:
-            _run_discover(
+            exit_code = _run_discover(
                 ctx,
                 TargetKind.LOCAL,
                 None,
@@ -93,7 +86,8 @@ def register(app: typer.Typer) -> None:
                 json_output=json_output,
             )
         except Exception as exc:
-            common.exit_with_error(exc, json_output=json_output)
+            output.exit_with_error(exc, json_output=json_output)
+        raise typer.Exit(code=exit_code)
 
 
 def _run_discover(
@@ -104,7 +98,7 @@ def _run_discover(
     *,
     workspace: Path | None,
     json_output: bool,
-) -> None:
+) -> int:
     target = TargetRef(kind=kind, id=target_id)
     loaded_workspace = _resolve_workspace_for_discovery(workspace)
     runner = common.debug_runner(ctx)
@@ -131,7 +125,7 @@ def _run_discover(
 
     if json_output:
         typer.echo(
-            common.json_payload(
+            output.json_payload(
                 {
                     "target": target.model_dump(mode="json", exclude_none=True),
                     "backend": discovery.backend,
@@ -150,13 +144,13 @@ def _run_discover(
         if discovery.error is not None or any(
             selection.status != "selected" for selection in selections.values()
         ):
-            raise typer.Exit(code=1)
-        return
+            return 1
+        return 0
 
     typer.echo(f"target={target.descriptor} backend={discovery.backend}")
     if discovery.error is not None:
         typer.echo(f"status=error reason={discovery.error}")
-        raise typer.Exit(code=1)
+        return 1
 
     for candidate in discovery.candidates:
         typer.echo(
@@ -189,16 +183,14 @@ def _run_discover(
             )
         if selection.status != "selected":
             exit_code = 1
-    if exit_code:
-        raise typer.Exit(code=exit_code)
+    return exit_code
 
 
 def _resolve_workspace_for_discovery(workspace: Path | None) -> LoadedWorkspace | None:
-    storage = WorkspaceStorage()
-    if workspace is not None:
-        return storage.load(workspace)
-
     try:
-        return storage.load(Path("."))
-    except Exception:
+        root = locate_workspace(workspace)
+    except WorkspaceNotFoundError as exc:
+        if exc.incomplete:
+            raise
         return None
+    return WorkspaceStorage().load(root)

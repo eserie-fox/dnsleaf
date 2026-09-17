@@ -8,7 +8,12 @@ This repository intentionally stays narrow and predictable.
 - Every `__init__.py` must set `__all__: list[str] = []`.
 - Package-level re-exports are not allowed; imports must target the defining module directly.
 - The root CLI is only a command entry surface.
-- `sync/runner.py` stays thin and orchestration-focused.
+- `sync/runner.py` stays orchestration-focused, with raw snapshots scoped to one run.
+- `workspace/locator.py` owns location only: sorted children before each base, first complete match.
+- `commands/output.py` owns presentation; normal service operations receive `LoadedWorkspace`.
+- `workspace/reports.py` owns operation DTOs without importing services/runners.
+- `workspace/state.py` owns reconciliation with an explicit timestamp and immutable previous input.
+- `dns/identity.py` shares target normalization between configuration validation and state.
 - Discovery backends only return candidate addresses.
 - Address selection happens in discovery/selector code, not in DNS providers.
 - DNS providers never guess which IP should be published.
@@ -92,3 +97,15 @@ an sdist rebuild. See [release](release.md) for account settings and publication
 
 `MANIFEST.in` only selects development docs and the complete test tree for the sdist; it does not
 configure another build system or add files to the installed wheel.
+
+Workspace command tests must inject bounded search bases for no-match cases; never scan a developer's
+real ancestors or home. Test the base-generation order separately. Partial warnings use stderr outside
+workspace logging. Do not add discovery to storage APIs that already receive a root. Keep diagnostics
+for status/doctor outside any logging context that first requires a successful source load.
+
+Discovery limits are shared formal defaults in `config_defaults/discovery.json`, merged into workspace
+and outside-workspace configurations. They apply only to address-discovery commands. New process
+fakes must accept `timeout` explicitly; do not guess old signatures by catching TypeError.
+
+Windows Guest tests are synthetic standard QGA fixtures. No Windows host runner, live-PVE CI, guest
+OS probing or Guest-side updater is needed. Keep the stable `ci / format-lint` and `ci / tests` checks.

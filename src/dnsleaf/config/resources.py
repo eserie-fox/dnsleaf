@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import yaml
 
@@ -51,7 +55,8 @@ def read_yaml_mapping(path: str | Path) -> dict[str, Any]:
     """Read one YAML override without including source values in parse errors."""
 
     try:
-        payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        with open_regular_text_file(Path(path)) as handle:
+            payload = yaml.safe_load(handle)
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         location = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
@@ -64,3 +69,23 @@ def read_yaml_mapping(path: str | Path) -> dict[str, Any]:
 
 
 __all__ = ["read_json", "read_json_mapping", "read_text"]
+
+
+def check_regular_readable_file(path: Path) -> None:
+    """Check layout/readability without reading or parsing configuration."""
+
+    with open_regular_text_file(path):
+        pass
+
+
+@contextmanager
+def open_regular_text_file(path: Path) -> Iterator[TextIO]:
+    """Reject special files, including a replacement between stat and open."""
+
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise OSError(f"source path is not a regular file: {path}")
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(fd, encoding="utf-8") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(f"source path is not a regular file: {path}")
+        yield handle

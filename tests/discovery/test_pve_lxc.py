@@ -15,7 +15,9 @@ def test_pve_lxc_backend_parses_ip_output() -> None:
 9: tun0    inet6 fd42:42:42:42::1/112 scope global
 """.strip()
 
-    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
+    def fake_runner(
+        args: Sequence[str], *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         assert args[:3] == ["pct", "exec", "101"]
         return CommandResult(args=tuple(args), returncode=0, stdout=sample_output, stderr="")
 
@@ -42,7 +44,9 @@ def test_pve_lxc_backend_tolerates_wrapped_ip_output_lines() -> None:
        valid_lft 31567sec preferred_lft 31567sec
 """.strip()
 
-    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
+    def fake_runner(
+        args: Sequence[str], *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         assert args[:3] == ["pct", "exec", "101"]
         return CommandResult(args=tuple(args), returncode=0, stdout=sample_output, stderr="")
 

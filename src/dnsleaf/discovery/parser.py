@@ -135,12 +135,12 @@ def _parse_qga_address_item(
         return None
 
     ip_address_type = ip_data.get("ip-address-type")
-    if ip_address_type not in {"ipv4", "ipv6"}:
+    if not isinstance(ip_address_type, str) or ip_address_type not in {"ipv4", "ipv6"}:
         return None
 
     address = ip_data.get("ip-address")
     prefix = ip_data.get("prefix")
-    if not isinstance(address, str) or not isinstance(prefix, int):
+    if not isinstance(address, str) or type(prefix) is not int:
         LOGGER.warning(
             "Skipping QGA interface %s address item %s: %s entry is missing address/prefix",
             interface_name,
@@ -160,10 +160,19 @@ def _parse_qga_address_item(
         )
         return None
 
+    if family != ip_address_type:
+        LOGGER.warning("Skipping QGA address item %s: address family mismatch", address_index)
+        return None
+    if "%" in address and not parsed_address.is_link_local:
+        LOGGER.warning(
+            "Skipping QGA address item %s: scope on non-link-local address", address_index
+        )
+        return None
+
     return AddressCandidate(
         family=IPAddressFamily(family),
         interface=interface_name,
-        address=str(parsed_address),
+        address=str(parsed_address).split("%", 1)[0],
         prefix_length=prefix_length,
         source=source,
         scope=None,

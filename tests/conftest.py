@@ -33,3 +33,11 @@ def block_host_commands_and_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("subprocess.run", denied)
     monkeypatch.setattr("socket.create_connection", denied)
+
+
+@pytest.fixture(autouse=True)
+def isolate_workspace_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No unmatched command test may inspect the developer's ancestors/home."""
+
+    monkeypatch.delenv("DNSLEAF_WORKSPACE", raising=False)
+    monkeypatch.setattr("dnsleaf.workspace.locator.search_bases", lambda cwd, home: [cwd])

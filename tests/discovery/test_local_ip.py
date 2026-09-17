@@ -13,7 +13,9 @@ def test_local_ip_backend_parses_ip_output() -> None:
 2: eth0    inet6 2001:4860:abcd:1234::3d6/128 scope global dynamic mngtmpaddr
 """.strip()
 
-    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
+    def fake_runner(
+        args: Sequence[str], *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         assert list(args) == LOCAL_DISCOVERY_COMMAND
         return CommandResult(args=tuple(args), returncode=0, stdout=sample_output, stderr="")
 
@@ -42,7 +44,9 @@ def test_local_ip_backend_rejects_non_local_targets() -> None:
 
 
 def test_local_ip_backend_returns_discovery_error_on_subprocess_failure() -> None:
-    def fake_runner(args: Sequence[str], *, check: bool = True) -> CommandResult:
+    def fake_runner(
+        args: Sequence[str], *, check: bool = True, timeout: float | None = None
+    ) -> CommandResult:
         raise CommandExecutionError(
             CommandResult(args=tuple(args), returncode=1, stdout="", stderr="boom")
         )

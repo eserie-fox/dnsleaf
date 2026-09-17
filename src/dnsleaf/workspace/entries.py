@@ -6,24 +6,22 @@ from pathlib import Path
 
 from dnsleaf.dns.models import TTLSetting
 from dnsleaf.models import EntryAddressFamily, EntrySourceKind
-from dnsleaf.workspace.models import EntriesFile, EntryMutationResult, WorkspaceEntry
-from dnsleaf.workspace.storage import WorkspaceLoadError, WorkspaceStorage, dump_yaml_data
+from dnsleaf.workspace.models import EntriesFile, WorkspaceEntry
+from dnsleaf.workspace.reports import EntryMutationResult
+from dnsleaf.workspace.storage import LoadedWorkspace, WorkspaceLoadError, dump_yaml_data
 
 
 class EntryService:
     """Manage workspace entries through stable file writes."""
 
-    def __init__(self, storage: WorkspaceStorage | None = None) -> None:
-        self._storage = storage or WorkspaceStorage()
-
-    def list_entries(self, workspace_dir: str | Path) -> list[WorkspaceEntry]:
+    def list_entries(self, loaded: LoadedWorkspace) -> list[WorkspaceEntry]:
         """Return all entries in a workspace."""
 
-        return list(self._storage.load(workspace_dir).entries_file.entries)
+        return list(loaded.entries_file.entries)
 
     def add_entry(
         self,
-        workspace_dir: str | Path,
+        loaded: LoadedWorkspace,
         *,
         name: str,
         source_kind: str,
@@ -39,7 +37,6 @@ class EntryService:
     ) -> EntryMutationResult:
         """Add one workspace entry."""
 
-        loaded = self._storage.load(workspace_dir)
         if loaded.entries_file.get(name) is not None:
             raise WorkspaceLoadError(f"entry already exists: {name}")
         entry = WorkspaceEntry(
@@ -74,7 +71,7 @@ class EntryService:
 
     def update_entry(
         self,
-        workspace_dir: str | Path,
+        loaded: LoadedWorkspace,
         *,
         name: str,
         fqdn: str | None = None,
@@ -91,7 +88,6 @@ class EntryService:
     ) -> EntryMutationResult:
         """Update a named entry."""
 
-        loaded = self._storage.load(workspace_dir)
         existing = loaded.entries_file.get(name)
         if existing is None:
             raise WorkspaceLoadError(f"entry not found: {name}")
@@ -133,10 +129,9 @@ class EntryService:
             entry=updated_entry,
         )
 
-    def remove_entry(self, workspace_dir: str | Path, *, name: str) -> EntryMutationResult:
+    def remove_entry(self, loaded: LoadedWorkspace, *, name: str) -> EntryMutationResult:
         """Remove a named entry."""
 
-        loaded = self._storage.load(workspace_dir)
         existing = loaded.entries_file.get(name)
         if existing is None:
             raise WorkspaceLoadError(f"entry not found: {name}")
@@ -154,14 +149,14 @@ class EntryService:
 
     def set_enabled(
         self,
-        workspace_dir: str | Path,
+        loaded: LoadedWorkspace,
         *,
         name: str,
         enabled: bool,
     ) -> EntryMutationResult:
         """Enable or disable a named entry."""
 
-        return self.update_entry(workspace_dir, name=name, enabled=enabled)
+        return self.update_entry(loaded, name=name, enabled=enabled)
 
     def _write_entries(self, path: Path, entries: EntriesFile) -> None:
         dump_yaml_data(path, entries.model_dump(mode="json", exclude_none=True))

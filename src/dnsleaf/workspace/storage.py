@@ -14,6 +14,7 @@ import yaml
 
 from dnsleaf.config.resources import read_yaml_mapping
 from dnsleaf.config.scaffold import load_scaffold_layout, load_scaffold_secrets_readme
+from dnsleaf.dns.cloudflare import CloudflareConfigurationError
 from dnsleaf.workspace.models import (
     EntriesFile,
     ManagedRecordFile,
@@ -167,11 +168,19 @@ class WorkspaceStorage:
         """Load workspace source files without runtime-only checks."""
 
         paths = self.paths_for(workspace_dir)
-        workspace_payload = load_yaml_mapping(paths.workspace_file)
-        entries_payload = load_yaml_mapping(paths.entries_file)
-        workspace_config = WorkspaceConfig.from_mapping(workspace_payload)
-        entries_file = EntriesFile.from_mapping(entries_payload)
-        resolved_workspace = workspace_config.resolve(paths.root)
+        try:
+            workspace_config = WorkspaceConfig.from_mapping(load_yaml_mapping(paths.workspace_file))
+            resolved_workspace = workspace_config.resolve(paths.root)
+        except (ValueError, OSError, WorkspaceLoadError) as exc:
+            raise WorkspaceLoadError(
+                f"workspace {paths.root}, file {paths.workspace_file}: {exc}"
+            ) from exc
+        try:
+            entries_file = EntriesFile.from_mapping(load_yaml_mapping(paths.entries_file))
+        except (ValueError, OSError, WorkspaceLoadError) as exc:
+            raise WorkspaceLoadError(
+                f"workspace {paths.root}, file {paths.entries_file}: {exc}"
+            ) from exc
         return LoadedWorkspace(
             paths=paths,
             workspace_config=workspace_config,
@@ -189,7 +198,13 @@ class WorkspaceStorage:
         """Validate runtime-resolved references for a previously loaded workspace."""
 
         provider_config = loaded.resolved_workspace.cloudflare_provider_config()
-        provider_config.resolved_api_token()
+        try:
+            provider_config.resolved_api_token()
+        except CloudflareConfigurationError as exc:
+            raise WorkspaceLoadError(
+                f"workspace {loaded.paths.root}, file {loaded.paths.workspace_file}, "
+                f"api_token_file: {exc}"
+            ) from exc
         return loaded
 
 

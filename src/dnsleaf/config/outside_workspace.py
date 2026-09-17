@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from dnsleaf.config.merge import deep_merge
 from dnsleaf.config.resources import read_json_mapping
-from dnsleaf.config.shared import DiscoveryCommandPaths
+from dnsleaf.config.shared import DiscoveryCommandPaths, DiscoveryConfig
 from dnsleaf.logging.config import DnsleafLoggingConfig
 
 OUTSIDE_WORKSPACE_RESOURCE_SPEC = "pkg://dnsleaf/config_defaults/outside_workspace.json"
@@ -21,6 +21,7 @@ class OutsideWorkspaceConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
 
+    discovery: DiscoveryConfig
     paths: DiscoveryCommandPaths
     dnsleaf_logging: DnsleafLoggingConfig
 
@@ -49,4 +50,7 @@ class OutsideWorkspaceConfig(BaseModel):
 
 
 def _read_defaults_mapping() -> dict[str, Any]:
-    return read_json_mapping(OUTSIDE_WORKSPACE_RESOURCE_SPEC)
+    return {
+        "discovery": DiscoveryConfig.from_defaults().model_dump(),
+        **read_json_mapping(OUTSIDE_WORKSPACE_RESOURCE_SPEC),
+    }

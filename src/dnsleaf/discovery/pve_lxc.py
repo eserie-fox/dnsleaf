@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from dnsleaf.config.shared import DiscoveryConfig
 from dnsleaf.discovery.base import DiscoveryBackend
 from dnsleaf.discovery.models import DiscoveryResult
 from dnsleaf.discovery.parser import parse_ip_addr_output
 from dnsleaf.models import TargetKind, TargetRef
-from dnsleaf.util.privilege import permission_hint
 from dnsleaf.util.process import ProcessRunner, run_command
 
 LXC_DISCOVERY_COMMAND = "ip -o addr show"
@@ -21,10 +21,16 @@ class PVELXCDiscoveryBackend(DiscoveryBackend):
         self,
         *,
         runner: ProcessRunner = run_command,
+        timeout_seconds: float | None = None,
         pct_bin: str = "pct",
         shell_bin: str = "sh",
     ) -> None:
         self._runner = runner
+        self._timeout = (
+            DiscoveryConfig.from_defaults().timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
         self._pct_bin = pct_bin
         self._shell_bin = shell_bin
 
@@ -44,12 +50,12 @@ class PVELXCDiscoveryBackend(DiscoveryBackend):
             LXC_DISCOVERY_COMMAND,
         ]
         try:
-            output = self._runner(args).stdout
+            output = self._runner(args, timeout=self._timeout).stdout
             candidates = parse_ip_addr_output(output, source=self.name)
             return DiscoveryResult(target=target, backend=self.name, candidates=candidates)
         except Exception as exc:
             return DiscoveryResult(
                 target=target,
                 backend=self.name,
-                error=f"{exc}. PVE guest discovery requires host privileges. {permission_hint()}",
+                error=str(exc),
             )
