@@ -9,8 +9,10 @@ from dnsleaf.discovery.models import (
     CandidateDisposition,
     DiscoveryResult,
     SelectionResult,
+    WindowsMetadataResult,
 )
-from dnsleaf.models import IPAddressFamily, SelectedAddress
+from dnsleaf.discovery.windows_selection import select_windows_dhcpv6
+from dnsleaf.models import IPAddressFamily, SelectedAddress, TargetKind
 from dnsleaf.util.ip import (
     has_embedded_eui64,
     looks_temporary_or_privacy,
@@ -26,11 +28,14 @@ def select_address(
     *,
     family: IPAddressFamily,
     policy: str = "default",
+    windows_evidence: WindowsMetadataResult | None = None,
 ) -> SelectionResult:
     """Select the best DNS address for one family from discovery candidates."""
 
-    if policy != "default":
+    if policy not in {"default", "windows-dhcpv6"}:
         raise ValueError(f"unsupported selection policy: {policy}")
+    if policy == "windows-dhcpv6" and result.target.kind is not TargetKind.VM:
+        raise ValueError("windows-dhcpv6 requires a VM target")
 
     candidates = [candidate for candidate in result.candidates if candidate.family is family]
     filtered_out: list[CandidateDisposition] = []
@@ -41,6 +46,11 @@ def select_address(
             filtered_out.append(CandidateDisposition(candidate=candidate, reason=unusable_reason))
             continue
         usable.append(candidate)
+
+    if policy == "windows-dhcpv6" and family is IPAddressFamily.IPV6:
+        return select_windows_dhcpv6(
+            result, usable=usable, filtered_out=filtered_out, evidence=windows_evidence
+        )
 
     if not usable:
         return SelectionResult(

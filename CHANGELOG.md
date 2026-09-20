@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0 — pending release
+
+- Added opt-in `windows-dhcpv6` IPv6 selection for VM ipv6/both entries and `discover vm`.
+- Kept the default policy and its Guest commands unchanged. Strict selection requires Windows
+  DHCP origins, Preferred state and SkipAsSource=false corroborated by QGA address/MAC identity.
+- Added a fixed packaged PowerShell 5.1 read-only metadata probe through bounded synchronous
+  `qm guest exec`, with explicit completion, exit, truncation, schema and encoding validation.
+- Refused incomplete/conflicting snapshots without heuristic fallback; exposed supplementary
+  errors independently of raw discovery and IPv4, preserving configured DNS targets.
+- Shared one raw and at most one supplementary snapshot per VM per run, including failed results.
+- Added synthetic protocol, selection, CLI, caching and fake-DNS safety regressions. No configuration,
+  state or systemd migration is required; live Windows/PVE acceptance and publication are separate.
+
+See [1.3.0 notes](docs/release-notes/1.3.0.md).
+
 ## 1.2.0 — pending release
 
 - Added explicit CLI / DNSLEAF_WORKSPACE / children-before-base automatic workspace selection.

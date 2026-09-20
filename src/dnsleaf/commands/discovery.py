@@ -49,6 +49,11 @@ def register(app: typer.Typer) -> None:
         ctx: typer.Context,
         target_id: int,
         family: EntryAddressFamily = common.FAMILY_BOTH_OPTION,
+        selection_policy: str = typer.Option(
+            "default",
+            "--selection-policy",
+            help="default or windows-dhcpv6 (opts into a read-only Guest metadata probe).",
+        ),
         workspace: Path | None = common.WORKSPACE_OPTION,
         json_output: bool = common.JSON_OPTION,
     ) -> None:
@@ -62,6 +67,7 @@ def register(app: typer.Typer) -> None:
                 family,
                 workspace=workspace,
                 json_output=json_output,
+                selection_policy=selection_policy,
             )
         except Exception as exc:
             output.exit_with_error(exc, json_output=json_output)
@@ -98,6 +104,7 @@ def _run_discover(
     *,
     workspace: Path | None,
     json_output: bool,
+    selection_policy: str = "default",
 ) -> int:
     target = TargetRef(kind=kind, id=target_id)
     loaded_workspace = _resolve_workspace_for_discovery(workspace)
@@ -107,7 +114,7 @@ def _run_discover(
         discovery, selections = runner.discover_target_families(
             target,
             families=family.concrete_families(),
-            policy="default",
+            policy=selection_policy,
         )
     else:
         with common.workspace_command_logging(
@@ -119,7 +126,7 @@ def _run_discover(
             discovery, selections = runner.discover_target_families(
                 target,
                 families=family.concrete_families(),
-                policy="default",
+                policy=selection_policy,
                 loaded_workspace=loaded_workspace,
             )
 
@@ -130,6 +137,8 @@ def _run_discover(
                     "target": target.model_dump(mode="json", exclude_none=True),
                     "backend": discovery.backend,
                     "error": discovery.error,
+                    "error_stage": discovery.error_stage,
+                    "parsing_issues": discovery.parsing_issues,
                     "candidates": [
                         candidate.model_dump(mode="json", exclude_none=True)
                         for candidate in discovery.candidates

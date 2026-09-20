@@ -16,6 +16,11 @@ This repository intentionally stays narrow and predictable.
 - `dns/identity.py` shares target normalization between configuration validation and state.
 - Discovery backends only return candidate addresses.
 - Address selection happens in discovery/selector code, not in DNS providers.
+- `discovery/windows.py` owns the fixed supplementary transport and strict protocol validation.
+- `discovery/windows_selection.py` correlates typed evidence and selects without I/O.
+- `probes/windows_ipv6.ps1` is the sole readable probe source; ship it in wheel and sdist.
+- Default-policy Guests never execute this probe. Keep raw and supplementary snapshots independent,
+  scoped to one run, and never enrich shared QGA candidates by mutation.
 - DNS providers never guess which IP should be published.
 - Workspace source files are the main user-maintained state.
 - Rendered artifacts and state files are generated outputs.
@@ -104,8 +109,12 @@ workspace logging. Do not add discovery to storage APIs that already receive a r
 for status/doctor outside any logging context that first requires a successful source load.
 
 Discovery limits are shared formal defaults in `config_defaults/discovery.json`, merged into workspace
-and outside-workspace configurations. They apply only to address-discovery commands. New process
+and outside-workspace configurations. They apply only to address-discovery commands, including the opted-in Windows metadata probe. New process
 fakes must accept `timeout` explicitly; do not guess old signatures by catching TypeError.
 
 Windows Guest tests are synthetic standard QGA fixtures. No Windows host runner, live-PVE CI, guest
-OS probing or Guest-side updater is needed. Keep the stable `ci / format-lint` and `ci / tests` checks.
+OS detection or Guest-side updater is needed. The Windows DHCPv6 policy explicitly opts into a
+fixed read-only PowerShell 5.1 metadata query; do not introduce arbitrary scripts or guest-exec
+frameworks. Test transport completion, ASCII-safe JSON/UTF-16LE command encoding, strict field types,
+identity/inventory consistency, policy ordering, family independence, and DNS/prune safety using fakes.
+No synthetic test establishes live PowerShell, PVE or Windows acceptance. Keep the stable `ci / format-lint` and `ci / tests` checks.

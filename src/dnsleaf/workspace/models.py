@@ -24,6 +24,7 @@ from dnsleaf.config.scaffold import (
     load_workspace_defaults,
 )
 from dnsleaf.config.shared import DiscoveryCommandPaths, DiscoveryConfig
+from dnsleaf.discovery.policies import validate_selection_policy
 from dnsleaf.dns.cloudflare import CloudflareProviderConfig
 from dnsleaf.dns.identity import dns_target
 from dnsleaf.dns.models import (
@@ -366,6 +367,12 @@ class WorkspaceEntry(BaseModel):
                 raise ValueError("dynamic lxc/vm entries require selection_policy")
             if self.static_ipv4 is not None or self.static_ipv6 is not None:
                 raise ValueError("dynamic lxc/vm entries must not define static IP values")
+        if self.selection_policy is not None:
+            validate_selection_policy(
+                self.selection_policy,
+                source_kind=self.source_kind.value,
+                families=self.concrete_families(),
+            )
         return self
 
     def to_target_ref(self) -> TargetRef:

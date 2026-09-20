@@ -50,4 +50,5 @@ def test_pyproject_includes_runtime_resources() -> None:
         "config_defaults/*.json",
         "templates/*.json",
         "templates/*.txt",
+        "probes/*.ps1",
     ]
