@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0 — pending release
+
+- Breaking: require explicit workspace schema 5 and entries schema 3; remove the windows-dhcpv6 preset.
+- Separate `require-dhcpv6` selection from `windows-powershell` evidence permission, with independent
+  nullable overrides and one exact VM-ID source-default layer. Report effective values and origins.
+- Normalize correlated evidence before pure, OS-independent strict selection; retain the fixed probe,
+  conservative inventory checks, per-run acquisition reuse and DNS/prune safeguards.
+- Preserve inheritance on entry edits, add explicit override clearing, and validate effective settings
+  before atomic replacement. Clarify discovery versus enrollment versus publication.
+- Preserve operational state, credentials and unit names. Package/config replacement must be
+  coordinated by the operator; no runtime conversion or compatibility loader is provided.
+
+See [1.4.0 notes](docs/release-notes/1.4.0.md).
+
+
 ## 1.3.0 — pending release
 
 - Added opt-in `windows-dhcpv6` IPv6 selection for VM ipv6/both entries and `discover vm`.

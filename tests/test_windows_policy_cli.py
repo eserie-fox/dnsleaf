@@ -55,11 +55,12 @@ def test_discover_policy_workspace_and_outside_json(
         "both" if case.startswith("both") else "ipv6",
     ]
     if case != "default":
-        args += ["--selection-policy", "windows-dhcpv6"]
+        args += ["--selection-policy", "require-dhcpv6", "--evidence", "windows-powershell"]
     if workspace:
         args += ["--workspace", str(workspace_dir)]
         (workspace_dir / "workspace.yaml").write_text(
-            "paths:\n  qm_bin: /test/configured-qm\ndiscovery:\n  timeout_seconds: 0.25\n"
+            "config_version: 5\npaths:\n  qm_bin: /test/configured-qm\n"
+            "discovery:\n  timeout_seconds: 0.25\n"
         )
     result = CliRunner().invoke(app, args)
     assert result.exit_code == (0 if case == "ipv6" else 1), result.output
@@ -68,24 +69,24 @@ def test_discover_policy_workspace_and_outside_json(
     v6 = payload["selections"]["ipv6"]
     if case == "default":
         assert len(commands.calls) == 1 and v6["status"] == "ambiguous"
-        assert "supplementary" not in v6
+        assert "evidence" not in v6
     else:
         assert len(commands.calls) == 2
         if workspace:
             assert commands.calls[1][0] == "/test/configured-qm"
             assert commands.timeouts[1] == 0.25
         if case == "both_metadata_failure":
-            assert v6["supplementary"]["status"] == "error"
+            assert v6["evidence"]["status"] == "error"
             assert payload["selections"]["ipv4"]["selected"]["address"] == "8.8.8.8"
         else:
             assert v6["selected"]["address"] == DHCP
-            assert v6["supplementary"]["addresses"][0]["prefix_origin"] == "Dhcp"
+            assert v6["evidence"]["observations"][0]["source_details"]["PrefixOrigin"] == "Dhcp"
             if case == "both_private_ipv4":
                 assert payload["selections"]["ipv4"]["status"] == "no_candidate"
     assert "error:" not in result.stderr.lower()
 
 
-@pytest.mark.parametrize("policy,family", [("typo", "ipv6"), ("windows-dhcpv6", "ipv4")])
+@pytest.mark.parametrize("policy,family", [("typo", "ipv6"), ("require-dhcpv6", "ipv4")])
 def test_invalid_discover_policy_never_executes(workspace_dir, policy, family, monkeypatch):
     commands = SyntheticWindowsCommands()
     sync = SyncRunner(
@@ -116,10 +117,10 @@ def test_invalid_discover_policy_never_executes(workspace_dir, policy, family, m
 @pytest.mark.parametrize(
     "kind,family,policy",
     [
-        ("lxc", "ipv6", "windows-dhcpv6"),
-        ("local", "both", "windows-dhcpv6"),
-        ("static", "ipv6", "windows-dhcpv6"),
-        ("vm", "ipv4", "windows-dhcpv6"),
+        ("lxc", "ipv6", "require-dhcpv6"),
+        ("local", "both", "require-dhcpv6"),
+        ("static", "ipv6", "require-dhcpv6"),
+        ("vm", "ipv4", "require-dhcpv6"),
         ("vm", "ipv6", "typo"),
         ("lxc", "ipv4", "typo"),
     ],
@@ -131,6 +132,7 @@ def test_entries_reject_invalid_source_family_policy(kind, family, policy):
         family=family,
         fqdn="test.example.com",
         selection_policy=policy,
+        evidence="windows-powershell",
         enabled=True,
     )
     if kind in {"lxc", "vm"}:
@@ -138,7 +140,7 @@ def test_entries_reject_invalid_source_family_policy(kind, family, policy):
     if kind == "static":
         entry["static_ipv6"] = DHCP
     with pytest.raises(ValidationError, match="selection_policy|selection policy|requires"):
-        EntriesFile.from_mapping({"entries": [entry]})
+        EntriesFile.from_mapping({"config_version": 3, "entries": [entry]})
 
 
 def test_entry_cli_policy_edits_and_collisions_are_atomic(workspace_dir):
@@ -158,7 +160,9 @@ def test_entry_cli_policy_edits_and_collisions_are_atomic(workspace_dir):
         "ipv6",
         *workspace,
     ]
-    result = runner.invoke(app, [*add, "--selection-policy", "windows-dhcpv6"])
+    result = runner.invoke(
+        app, [*add, "--selection-policy", "require-dhcpv6", "--evidence", "windows-powershell"]
+    )
     assert result.exit_code == 0, result.output
     path = workspace_dir / "entries.yaml"
     original = path.read_bytes()
@@ -180,12 +184,12 @@ def test_entry_cli_policy_edits_and_collisions_are_atomic(workspace_dir):
             "--fqdn",
             "WINDOWS.EXAMPLE.COM.",
             "--selection-policy",
-            "windows-dhcpv6",
+            "require-dhcpv6",
             *workspace,
         ],
     )
     assert result.exit_code != 0 and path.read_bytes() == original
-    for policy in ("default", "windows-dhcpv6"):
+    for policy in ("default", "require-dhcpv6"):
         result = runner.invoke(
             app, ["entry", "update", "windows", *workspace, "--selection-policy", policy]
         )

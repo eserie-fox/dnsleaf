@@ -57,6 +57,7 @@ def test_workspace_constructors_merge_before_validation_and_resolve_explicitly(t
     from dnsleaf.workspace.models import WorkspaceConfig
 
     override = {
+        "config_version": 5,
         "workspace_name": "demo",
         "api_token_file": "credentials/token.txt",
         "dnsleaf_logging": {"level": "DEBUG"},
@@ -64,7 +65,7 @@ def test_workspace_constructors_merge_before_validation_and_resolve_explicitly(t
     config = WorkspaceConfig.from_mapping(override)
     file = tmp_path / "workspace.yaml"
     file.write_text(
-        "workspace_name: demo\napi_token_file: credentials/token.txt\n"
+        "config_version: 5\nworkspace_name: demo\napi_token_file: credentials/token.txt\n"
         "dnsleaf_logging:\n  level: DEBUG\n"
     )
     assert WorkspaceConfig.from_file(file) == config
@@ -89,7 +90,7 @@ def test_unknown_fields_and_wrong_scalar_types_are_rejected() -> None:
     ]
     for data in cases:
         with pytest.raises(ValueError) as error:
-            WorkspaceConfig.from_mapping(data)
+            WorkspaceConfig.from_mapping({"config_version": 5, **data})
         assert "TEST_ONLY_SECRET" not in str(error.value)
 
 
@@ -98,9 +99,9 @@ def test_entries_constructors_and_replacement(tmp_path) -> None:
 
     defaults = EntriesFile.from_defaults()
     file = tmp_path / "entries.yaml"
-    file.write_text("entries: []\n")
+    file.write_text("config_version: 3\nentries: []\n")
     assert EntriesFile.from_file(file) == defaults
-    assert EntriesFile.from_mapping({"entries": []}) == defaults
+    assert EntriesFile.from_mapping({"config_version": 3, "entries": []}) == defaults
 
 
 def test_yaml_nonmapping_values_and_errors_do_not_leak_input(tmp_path) -> None:
@@ -128,11 +129,13 @@ def test_discovery_timeout_defaults_overrides_and_validation(tmp_path: Path) -> 
     assert WorkspaceConfig.from_defaults().discovery.timeout_seconds == 30
     assert OutsideWorkspaceConfig.from_defaults().discovery.timeout_seconds == 30
     assert (
-        WorkspaceConfig.from_mapping({"discovery": {"timeout_seconds": 8}})
+        WorkspaceConfig.from_mapping({"config_version": 5, "discovery": {"timeout_seconds": 8}})
         .resolve(tmp_path)
         .discovery.timeout_seconds
         == 8
     )
     for value in [0, -1, True, "30", None, float("inf"), float("nan")]:
         with pytest.raises(ValueError):
-            WorkspaceConfig.from_mapping({"discovery": {"timeout_seconds": value}})
+            WorkspaceConfig.from_mapping(
+                {"config_version": 5, "discovery": {"timeout_seconds": value}}
+            )

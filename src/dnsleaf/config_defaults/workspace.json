@@ -1,5 +1,5 @@
 {
-  "config_version": 4,
+  "config_version": 5,
   "workspace_name": "example-workspace",
   "provider": "cloudflare",
   "zone_name": "example.com",
@@ -30,5 +30,6 @@
     "file_path": "runtime/logs/dnsleaf.log",
     "retention_days": 7,
     "stream": "none"
-  }
+  },
+  "source_defaults": []
 }

@@ -24,7 +24,12 @@ from dnsleaf.config.scaffold import (
     load_workspace_defaults,
 )
 from dnsleaf.config.shared import DiscoveryCommandPaths, DiscoveryConfig
-from dnsleaf.discovery.policies import validate_selection_policy
+from dnsleaf.config.strategy import (
+    EvidenceSource,
+    SelectionPolicy,
+    SourceDefault,
+    validate_strategy_source,
+)
 from dnsleaf.dns.cloudflare import CloudflareProviderConfig
 from dnsleaf.dns.identity import dns_target
 from dnsleaf.dns.models import (
@@ -38,6 +43,12 @@ from dnsleaf.util.ip import normalize_ip
 
 WORKSPACE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 ENTRY_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def require_source_version(data: Mapping[str, Any], *, expected: int, filename: str) -> None:
+    value = data.get("config_version")
+    if type(value) is not int or value != expected:
+        raise ValueError(f"{filename} requires explicit integer config_version: {expected}")
 
 
 def _validate_name(value: str, *, pattern: re.Pattern[str], field_name: str) -> str:
@@ -145,6 +156,7 @@ class WorkspaceConfig(BaseModel):
     api_token_file: str
     default_ttl: TTLSetting
     default_proxied: bool | None
+    source_defaults: list[SourceDefault]
     discovery: DiscoveryConfig
     paths: WorkspaceRuntimePaths
     systemd: WorkspaceSystemdConfig
@@ -154,9 +166,19 @@ class WorkspaceConfig(BaseModel):
     @field_validator("config_version")
     @classmethod
     def _validate_config_version(cls, value: int) -> int:
-        if value != 4:
-            raise ValueError("workspace config_version must be exactly 4")
+        if value != 5:
+            raise ValueError("workspace config_version must be exactly 5")
         return value
+
+    @model_validator(mode="after")
+    def _validate_source_groups(self) -> Self:
+        seen: set[int] = set()
+        for group in self.source_defaults:
+            overlap = seen.intersection(group.source_ids)
+            if overlap:
+                raise ValueError(f"overlapping source-default VM IDs: {sorted(overlap)}")
+            seen.update(group.source_ids)
+        return self
 
     @field_validator("workspace_name")
     @classmethod
@@ -216,18 +238,24 @@ class WorkspaceConfig(BaseModel):
     def from_defaults(cls) -> WorkspaceConfig:
         """Load formal defaults without resolving runtime paths."""
 
-        return cls.from_mapping({})
+        return cls.model_validate(
+            {"discovery": DiscoveryConfig.from_defaults().model_dump(), **load_workspace_defaults()}
+        )
 
     @classmethod
     def from_file(cls, path: str | Path) -> WorkspaceConfig:
         """Merge one YAML override over package defaults, then validate."""
 
-        return cls.from_mapping(read_yaml_mapping(path))
+        try:
+            return cls.from_mapping(read_yaml_mapping(path))
+        except ValueError as exc:
+            raise ValueError(f"{path}: {exc}") from exc
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> WorkspaceConfig:
         """Merge mappings recursively; replace lists and scalar values."""
 
+        require_source_version(data, expected=5, filename="workspace.yaml")
         return cls.model_validate(
             deep_merge(
                 {
@@ -242,7 +270,9 @@ class WorkspaceConfig(BaseModel):
     def scaffold_defaults(cls, workspace_name: str) -> WorkspaceConfig:
         """Build the typed default `workspace.yaml` model for one workspace name."""
 
-        return cls.from_mapping({"workspace_name": workspace_name})
+        return cls.model_validate(
+            {**cls.from_defaults().model_dump(), "workspace_name": workspace_name}
+        )
 
     def resolve(self, workspace_root: Path) -> ResolvedWorkspace:
         """Resolve runtime-only workspace values."""
@@ -258,6 +288,7 @@ class WorkspaceConfig(BaseModel):
             default_proxied=self.default_proxied,
             paths=self.paths.resolve(workspace_root),
             discovery=self.discovery,
+            source_defaults=self.source_defaults,
             systemd=ResolvedWorkspaceSystemdConfig(
                 service_name=self.resolved_service_name(),
                 timer_name=self.resolved_timer_name(),
@@ -281,7 +312,8 @@ class WorkspaceEntry(BaseModel):
     fqdn: str
     enabled: StrictBool
     source_id: StrictInt | None = Field(default=None, ge=1)
-    selection_policy: str | None = None
+    selection_policy: SelectionPolicy | None = None
+    evidence: EvidenceSource | None = None
     ttl: TTLSetting | None = None
     proxied: StrictBool | None = None
     description: str | None = None
@@ -300,14 +332,6 @@ class WorkspaceEntry(BaseModel):
         if not stripped:
             raise ValueError("fqdn must not be blank")
         return stripped
-
-    @field_validator("selection_policy")
-    @classmethod
-    def _normalize_selection_policy(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        stripped = value.strip()
-        return stripped or None
 
     @field_validator("ttl", mode="before")
     @classmethod
@@ -356,23 +380,19 @@ class WorkspaceEntry(BaseModel):
         elif self.source_kind is EntrySourceKind.LOCAL:
             if self.source_id is not None:
                 raise ValueError("dynamic local entries must not define source_id")
-            if self.selection_policy is None:
-                raise ValueError("dynamic local entries require selection_policy")
             if self.static_ipv4 is not None or self.static_ipv6 is not None:
                 raise ValueError("dynamic local entries must not define static IP values")
         else:
             if self.source_id is None:
                 raise ValueError("dynamic lxc/vm entries require source_id")
-            if self.selection_policy is None:
-                raise ValueError("dynamic lxc/vm entries require selection_policy")
             if self.static_ipv4 is not None or self.static_ipv6 is not None:
                 raise ValueError("dynamic lxc/vm entries must not define static IP values")
-        if self.selection_policy is not None:
-            validate_selection_policy(
-                self.selection_policy,
-                source_kind=self.source_kind.value,
-                families=self.concrete_families(),
-            )
+        validate_strategy_source(
+            source_kind=self.source_kind.value,
+            families=self.concrete_families(),
+            selection_policy=self.selection_policy,
+            evidence=self.evidence,
+        )
         return self
 
     def to_target_ref(self) -> TargetRef:
@@ -443,8 +463,8 @@ class EntriesFile(BaseModel):
     @field_validator("config_version")
     @classmethod
     def _validate_config_version(cls, value: int) -> int:
-        if value != 2:
-            raise ValueError("entries config_version must be exactly 2")
+        if value != 3:
+            raise ValueError("entries config_version must be exactly 3")
         return value
 
     @model_validator(mode="after")
@@ -497,7 +517,10 @@ class EntriesFile(BaseModel):
     def from_file(cls, path: str | Path) -> EntriesFile:
         """Load defaults plus one YAML entries override."""
 
-        return cls.from_mapping(read_yaml_mapping(path))
+        try:
+            return cls.from_mapping(read_yaml_mapping(path))
+        except ValueError as exc:
+            raise ValueError(f"{path}: {exc}") from exc
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> EntriesFile:
@@ -509,6 +532,7 @@ class EntriesFile(BaseModel):
                 "use entries: [] for an intentionally empty list"
             )
 
+        require_source_version(data, expected=3, filename="entries.yaml")
         return cls.model_validate(deep_merge(load_entries_defaults(), data))
 
     @classmethod
@@ -560,6 +584,7 @@ class ResolvedWorkspace(BaseModel):
     api_token_file: str
     default_ttl: int
     default_proxied: bool | None
+    source_defaults: list[SourceDefault]
     discovery: DiscoveryConfig
     paths: ResolvedWorkspaceRuntimePaths
     systemd: ResolvedWorkspaceSystemdConfig

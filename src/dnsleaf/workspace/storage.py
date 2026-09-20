@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ import yaml
 
 from dnsleaf.config.resources import read_yaml_mapping
 from dnsleaf.config.scaffold import load_scaffold_layout, load_scaffold_secrets_readme
+from dnsleaf.config.strategy import ResolvedStrategy
 from dnsleaf.dns.cloudflare import CloudflareConfigurationError
 from dnsleaf.workspace.models import (
     EntriesFile,
@@ -22,6 +23,7 @@ from dnsleaf.workspace.models import (
     WorkspaceConfig,
     WorkspaceEntry,
 )
+from dnsleaf.workspace.strategy import resolve_entry_strategies
 
 
 class WorkspaceError(RuntimeError):
@@ -111,6 +113,10 @@ class LoadedWorkspace:
     workspace_config: WorkspaceConfig
     resolved_workspace: ResolvedWorkspace
     entries_file: EntriesFile
+    strategies: dict[str, ResolvedStrategy] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.strategies = resolve_entry_strategies(self.workspace_config, self.entries_file)
 
     def enabled_entries(self) -> list[WorkspaceEntry]:
         """Return enabled entries only."""
@@ -181,12 +187,17 @@ class WorkspaceStorage:
             raise WorkspaceLoadError(
                 f"workspace {paths.root}, file {paths.entries_file}: {exc}"
             ) from exc
-        return LoadedWorkspace(
-            paths=paths,
-            workspace_config=workspace_config,
-            resolved_workspace=resolved_workspace,
-            entries_file=entries_file,
-        )
+        try:
+            return LoadedWorkspace(
+                paths=paths,
+                workspace_config=workspace_config,
+                resolved_workspace=resolved_workspace,
+                entries_file=entries_file,
+            )
+        except ValueError as exc:
+            raise WorkspaceLoadError(
+                f"workspace {paths.root}, file {paths.entries_file}: {exc}"
+            ) from exc
 
     def validate(self, workspace_dir: str | Path) -> LoadedWorkspace:
         """Load a workspace and validate runtime-resolved references."""

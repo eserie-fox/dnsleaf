@@ -15,7 +15,7 @@ Each entry contains:
 - `family`
 - `enabled`
 - optional `source_id` for `lxc` and `vm`
-- optional `selection_policy` for dynamic entries
+- optional nullable `selection_policy` and `evidence` for dynamic entries (omission/null inherits)
 - optional `ttl`
 - optional `proxied`
 - optional `description`
@@ -24,12 +24,13 @@ Each entry contains:
 
 Validation rules:
 
-- `source_kind=lxc|vm` requires `source_id` and `selection_policy`
-- `source_kind=local` requires `selection_policy` and forbids `source_id`
-- `source_kind=static` forbids `source_id` and `selection_policy`
+- `source_kind=lxc|vm` requires `source_id`
+- `source_kind=local` forbids `source_id`
+- `source_kind=static` forbids `source_id` and non-null policy/evidence overrides
 - `selection_policy=default` keeps existing selection and performs no supplementary Guest execution
-- `selection_policy=windows-dhcpv6` requires `source_kind=vm` and `family=ipv6|both`; it explicitly
-  opts into the fixed read-only Windows metadata probe, with no IPv6 heuristic fallback
+- `selection_policy=require-dhcpv6` requires `family=ipv6|both` and reliable DHCP evidence, with no heuristic fallback
+- `evidence=windows-powershell` permits the fixed read-only VM metadata probe; `none` disallows it
+- strict policy requires Windows evidence in this release; default policy never uses that permission
 - `family=ipv4` manages one `A` record flow
 - `family=ipv6` manages one `AAAA` record flow
 - `family=both` manages two independent record flows
@@ -73,12 +74,17 @@ dnsleaf entry add lxc --workspace ./workspaces/example-zone --id 101 --fqdn host
 dnsleaf entry add lxc --workspace ./workspaces/example-zone --id 101 --fqdn host.example.com --name web --family both --no-proxied
 ```
 
-For an explicitly verified Windows DHCPv6 target, add `--selection-policy windows-dhcpv6` to
-`entry add vm`, or use `entry update guest --selection-policy windows-dhcpv6`. Verify first with
-`discover vm 201 --family ipv6 --selection-policy windows-dhcpv6 --json` against your workspace.
+For an explicitly verified Windows DHCPv6 target, add `--selection-policy require-dhcpv6 --evidence windows-powershell` to
+`entry add vm`, or use `entry update guest --selection-policy require-dhcpv6 --evidence windows-powershell`. Verify first with
+`discover vm 201 --family ipv6 --selection-policy require-dhcpv6 --evidence windows-powershell --json` against your workspace.
 This requires guest-exec capability as well as QGA address discovery; see
-[prerequisites and diagnostics](discovery.md#windows-dhcpv6-opt-in). Unknown policy names and
+[prerequisites and diagnostics](discovery.md#dhcpv6-requirement-and-windows-evidence). Unknown policy names and
 incompatible edits fail validation without replacing `entries.yaml`.
+
+Omitted strategy options on add preserve inheritance from workspace source defaults and then
+package built-ins. Update can clear either override with `--inherit-selection-policy` or
+`--inherit-evidence`; set and inherit flags for the same field cannot be combined. Explicit
+`default`/`none` are overrides, not inheritance. Unrelated edits preserve raw overrides.
 
 ### Add static entries
 
@@ -124,7 +130,7 @@ It does not immediately delete the remote Cloudflare record.
 
 Remote deletion only happens later if prune is explicitly enabled and the record is still present in `managed-records.json`.
 
-## Migration
+## Proxy ownership
 
 To stop dnsleaf from overwriting manual Cloudflare proxy toggles by default:
 

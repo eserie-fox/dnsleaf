@@ -26,13 +26,13 @@ def test_init_creates_expected_workspace_tree(tmp_path: Path) -> None:
     assert (workspace / "state" / "managed-records.json").exists()
 
     workspace_payload = yaml.safe_load((workspace / "workspace.yaml").read_text(encoding="utf-8"))
-    assert workspace_payload["config_version"] == 4
+    assert workspace_payload["config_version"] == 5
     assert workspace_payload["default_ttl"] == "auto"
     assert workspace_payload["default_proxied"] is None
     assert workspace_payload["paths"]["systemctl_bin"] == "systemctl"
 
     entries_payload = yaml.safe_load((workspace / "entries.yaml").read_text(encoding="utf-8"))
-    assert entries_payload == {"config_version": 2, "entries": []}
+    assert entries_payload == {"config_version": 3, "entries": []}
     assert WorkspaceStorage().load(workspace).entries_file == EntriesFile.from_defaults()
 
 
@@ -51,7 +51,7 @@ def test_workspace_scaffold_defaults_build_typed_model() -> None:
 def test_entries_scaffold_defaults_build_typed_model() -> None:
     entries = EntriesFile.scaffold_defaults()
 
-    assert entries.config_version == 2
+    assert entries.config_version == 3
     assert entries.entries == []
 
 
@@ -88,7 +88,7 @@ def test_validate_rejects_old_workspace_schema_version(workspace_dir: Path) -> N
         encoding="utf-8",
     )
 
-    with pytest.raises(WorkspaceLoadError, match="config_version must be exactly 4"):
+    with pytest.raises(WorkspaceLoadError, match="explicit integer config_version: 5"):
         WorkspaceService().validate_workspace(WorkspaceStorage().load(workspace_dir))
 
 
@@ -111,7 +111,7 @@ def test_validate_resolves_relative_systemd_unit_dir(workspace_dir: Path) -> Non
 def test_validate_rejects_old_record_type_entry_schema(workspace_dir: Path) -> None:
     (workspace_dir / "entries.yaml").write_text(
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: web\n"
             "    source_kind: lxc\n"
@@ -131,7 +131,7 @@ def test_validate_rejects_old_record_type_entry_schema(workspace_dir: Path) -> N
 def test_validate_rejects_static_entry_without_matching_values(workspace_dir: Path) -> None:
     (workspace_dir / "entries.yaml").write_text(
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: edge\n"
             "    source_kind: static\n"
@@ -150,7 +150,7 @@ def test_validate_rejects_static_entry_without_matching_values(workspace_dir: Pa
 def test_render_generates_effective_workspace_and_systemd_artifacts(workspace_dir: Path) -> None:
     (workspace_dir / "entries.yaml").write_text(
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: web\n"
             "    source_kind: lxc\n"

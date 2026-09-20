@@ -6,14 +6,15 @@ from collections.abc import Callable
 from typing import Literal
 
 from dnsleaf.config.outside_workspace import OutsideWorkspaceConfig
+from dnsleaf.config.strategy import ResolvedStrategy
 from dnsleaf.discovery.base import DiscoveryBackend
 from dnsleaf.discovery.local_ip import LocalIPDiscoveryBackend
-from dnsleaf.discovery.models import DiscoveryResult, SelectionResult, WindowsMetadataResult
-from dnsleaf.discovery.policies import validate_selection_policy
+from dnsleaf.discovery.models import CorrelatedEvidence, DiscoveryResult, SelectionResult
 from dnsleaf.discovery.pve_lxc import PVELXCDiscoveryBackend
 from dnsleaf.discovery.pve_qga import PVEQGADiscoveryBackend
 from dnsleaf.discovery.selectors import select_address
-from dnsleaf.discovery.windows import WindowsMetadataProbe
+from dnsleaf.discovery.windows import WindowsMetadataProbe, WindowsMetadataResult
+from dnsleaf.discovery.windows_correlation import correlate_windows_evidence
 from dnsleaf.dns.base import DNSProvider
 from dnsleaf.dns.cloudflare import CloudflareDNSProvider
 from dnsleaf.dns.models import DesiredRecord, cloudflare_effective_ttl
@@ -43,42 +44,28 @@ class SyncRunner:
         self._provider_factory = provider_factory
         self._windows_probe = windows_probe or WindowsMetadataProbe()
 
-    def discover_target(
-        self,
-        target: TargetRef,
-        *,
-        family: IPAddressFamily,
-        policy: str = "default",
-        loaded_workspace: LoadedWorkspace | None = None,
-    ) -> tuple[DiscoveryResult, SelectionResult]:
-        """Discover and select an address for one target family."""
-
-        discovery, selections = self.discover_target_families(
-            target, families=(family,), policy=policy, loaded_workspace=loaded_workspace
-        )
-        return discovery, selections[family]
-
     def discover_target_families(
         self,
         target: TargetRef,
         *,
         families: tuple[IPAddressFamily, ...],
-        policy: str = "default",
+        strategy: ResolvedStrategy,
         loaded_workspace: LoadedWorkspace | None = None,
     ) -> tuple[DiscoveryResult, dict[IPAddressFamily, SelectionResult]]:
         """Discover once and select addresses for multiple families."""
 
-        validate_selection_policy(policy, source_kind=target.kind.value, families=families)
         backend = self._backend_for_kind(target.kind, loaded_workspace=loaded_workspace)
         discovery = backend.discover(target)
         evidence = (
-            self._query_windows_metadata(target, loaded_workspace)
-            if policy == "windows-dhcpv6" and discovery.ok
+            correlate_windows_evidence(
+                discovery, self._query_windows_metadata(target, loaded_workspace)
+            )
+            if strategy.requires_evidence and discovery.ok
             else None
         )
         return discovery, {
             family: select_discovered_address(
-                discovery, family=family, policy=policy, windows_evidence=evidence
+                discovery, family=family, policy=strategy.selection_policy, evidence=evidence
             )
             for family in families
         }
@@ -93,13 +80,6 @@ class SyncRunner:
     ) -> WorkspaceRunReport:
         """Plan and optionally apply one workspace run."""
 
-        for entry in loaded.entries_file.entries:
-            if entry.selection_policy is not None:
-                validate_selection_policy(
-                    entry.selection_policy,
-                    source_kind=entry.source_kind.value,
-                    families=entry.concrete_families(),
-                )
         desired_targets = set(enabled_dns_targets(loaded.entries_file))
         provider = self._provider_factory(loaded)
         discoveries: dict[tuple[EntrySourceKind, int | None], DiscoveryResult] = {}
@@ -164,16 +144,22 @@ class SyncRunner:
             backend = self._backend_for_kind(target.kind, loaded_workspace=loaded)
             discoveries[key] = backend.discover(target)
         discovery = discoveries[key]
-        if entry.selection_policy == "windows-dhcpv6" and discovery.ok:
+        strategy = loaded.strategies[entry.name]
+        if strategy.requires_evidence and discovery.ok:
             if target not in windows_metadata:
                 windows_metadata[target] = self._query_windows_metadata(target, loaded)
-        evidence = windows_metadata.get(target)
+        metadata = windows_metadata.get(target)
+        evidence = (
+            correlate_windows_evidence(discovery, metadata)
+            if strategy.requires_evidence and metadata is not None
+            else None
+        )
         selections = {
             family: select_discovered_address(
                 discovery,
                 family=family,
-                policy=entry.selection_policy or "default",
-                windows_evidence=evidence,
+                policy=strategy.selection_policy,
+                evidence=evidence,
             )
             for family in entry.concrete_families()
         }
@@ -181,8 +167,8 @@ class SyncRunner:
         for family in entry.concrete_families():
             selection = selections[family]
             metadata_error = (
-                selection.supplementary.error
-                if selection.supplementary is not None and selection.supplementary.status == "error"
+                selection.evidence.reason
+                if selection.evidence is not None and selection.evidence.status == "error"
                 else None
             )
             if discovery.error is not None or metadata_error is not None:
@@ -239,7 +225,7 @@ class SyncRunner:
                     selection_reason=selection.reason,
                 )
             )
-        return outcomes
+        return [outcome.model_copy(update={"strategy": strategy}) for outcome in outcomes]
 
     def _plan_static_record(
         self,
@@ -532,7 +518,7 @@ def select_discovered_address(
     *,
     family: IPAddressFamily,
     policy: str,
-    windows_evidence: WindowsMetadataResult | None = None,
+    evidence: CorrelatedEvidence | None = None,
 ) -> SelectionResult:
     """Select independently without changing the shared raw discovery snapshot."""
 
@@ -548,6 +534,4 @@ def select_discovered_address(
             not_selected=[],
             reason=f"discovery failed: {discovery.error}",
         )
-    return select_address(
-        discovery, family=family, policy=policy, windows_evidence=windows_evidence
-    )
+    return select_address(discovery, family=family, policy=policy, evidence=evidence)

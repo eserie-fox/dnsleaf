@@ -47,7 +47,7 @@ def test_runner_dry_run_does_not_apply_changes(tmp_path: Path) -> None:
     loaded, _storage = _prepare_loaded_workspace(
         tmp_path,
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: web\n"
             "    source_kind: lxc\n"
@@ -78,7 +78,7 @@ def test_runner_apply_calls_provider_for_static_both_entry(tmp_path: Path) -> No
     loaded, _storage = _prepare_loaded_workspace(
         tmp_path,
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: edge\n"
             "    source_kind: static\n"
@@ -109,7 +109,7 @@ def test_runner_handles_dynamic_both_with_one_family_ambiguous(tmp_path: Path) -
     loaded, _storage = _prepare_loaded_workspace(
         tmp_path,
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: dual\n"
             "    source_kind: lxc\n"
@@ -166,7 +166,7 @@ def test_runner_plans_prune_for_tracked_stale_record(tmp_path: Path) -> None:
     loaded, _storage = _prepare_loaded_workspace(
         tmp_path,
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: web\n"
             "    source_kind: lxc\n"
@@ -252,7 +252,7 @@ def test_runner_preserves_remote_proxy_state_when_proxy_is_unmanaged(tmp_path: P
     loaded, storage = _prepare_loaded_workspace(
         tmp_path,
         (
-            "config_version: 2\n"
+            "config_version: 3\n"
             "entries:\n"
             "  - name: web\n"
             "    source_kind: lxc\n"
@@ -300,7 +300,7 @@ def test_unavailable_family_preserves_existing_managed_record_during_prune(tmp_p
     loaded, _ = _prepare_loaded_workspace(
         tmp_path,
         """
-config_version: 2
+config_version: 3
 entries:
   - name: dual
     source_kind: lxc

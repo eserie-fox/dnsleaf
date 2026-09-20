@@ -23,13 +23,13 @@ INVALID_DOCUMENTS = [
     pytest.param("null\n", id="null"),
     pytest.param("~\n", id="null-shorthand"),
     pytest.param("{}\n", id="empty-mapping"),
-    pytest.param("config_version: 2\n", id="missing-entries"),
-    pytest.param("entries: null\n", id="null-entries"),
-    pytest.param("entries: {}\n", id="mapping-entries"),
-    pytest.param("entries: invalid\n", id="scalar-entries"),
-    pytest.param("entries: [null]\n", id="null-entry"),
-    pytest.param("entries: [42]\n", id="scalar-entry"),
-    pytest.param("entries: [{}]\n", id="incomplete-entry"),
+    pytest.param("config_version: 3\n", id="missing-entries"),
+    pytest.param("config_version: 3\nentries: null\n", id="null-entries"),
+    pytest.param("config_version: 3\nentries: {}\n", id="mapping-entries"),
+    pytest.param("config_version: 3\nentries: invalid\n", id="scalar-entries"),
+    pytest.param("config_version: 3\nentries: [null]\n", id="null-entry"),
+    pytest.param("config_version: 3\nentries: [42]\n", id="scalar-entry"),
+    pytest.param("config_version: 3\nentries: [{}]\n", id="incomplete-entry"),
     pytest.param("[]\n", id="list-root"),
     pytest.param("false\n", id="boolean-root"),
     pytest.param("42\n", id="number-root"),
@@ -50,11 +50,18 @@ def test_entries_constructors_reject_invalid_documents(tmp_path: Path, document:
 
 def test_missing_entries_error_explains_explicit_empty_list() -> None:
     with pytest.raises(ValueError, match="explicit 'entries' field.*entries: \\[\\]"):
-        EntriesFile.from_mapping({"config_version": 2})
+        EntriesFile.from_mapping({"config_version": 3})
 
 
 def test_unrelated_configs_still_accept_empty_overrides() -> None:
-    assert WorkspaceConfig.from_mapping({}) == WorkspaceConfig.from_defaults()
+    assert (
+        WorkspaceConfig.from_mapping(
+            {
+                "config_version": 5,
+            }
+        )
+        == WorkspaceConfig.from_defaults()
+    )
     assert OutsideWorkspaceConfig.from_mapping({}) == OutsideWorkspaceConfig.from_defaults()
 
 
@@ -135,7 +142,7 @@ def test_explicit_empty_entries_preserve_intentional_pruning(
 ) -> None:
     service, provider, _ = _managed_service(workspace_dir)
     paths = WorkspaceStorage().paths_for(workspace_dir)
-    paths.entries_file.write_text("config_version: 2\nentries: []\n", encoding="utf-8")
+    paths.entries_file.write_text("config_version: 3\nentries: []\n", encoding="utf-8")
     original_state = paths.managed_records_file.read_bytes()
     original_records = provider.list_records("host.example.com")
     untracked = provider.list_records("host.example.com", "AAAA")

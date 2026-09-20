@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ from tests.fakes import FakeDNSProvider
 from tests.windows_fixtures import DHCP, LINK, SyntheticWindowsCommands
 
 
-def entry(name="strict", policy="windows-dhcpv6", family="ipv6", vmid=201):
+def entry(name="strict", policy="require-dhcpv6", family="ipv6", vmid=201):
     return dict(
         name=name,
         source_kind="vm",
@@ -27,6 +28,7 @@ def entry(name="strict", policy="windows-dhcpv6", family="ipv6", vmid=201):
         fqdn=f"{name}.example.com",
         enabled=True,
         selection_policy=policy,
+        evidence="windows-powershell",
         proxied=False,
     )
 
@@ -41,7 +43,9 @@ def make_runner(commands, provider):
 
 def load(workspace_dir, entries):
     loaded = WorkspaceStorage().load(workspace_dir)
-    loaded.entries_file = EntriesFile.from_mapping({"entries": entries})
+    loaded = replace(
+        loaded, entries_file=EntriesFile.from_mapping({"config_version": 3, "entries": entries})
+    )
     return loaded
 
 
@@ -83,7 +87,7 @@ def test_mixed_policies_share_raw_and_metadata_and_refresh_next_run(workspace_di
     first = run(runner, loaded)
     by_name = {o.entry_name: o for o in first.record_outcomes if o.family is IPAddressFamily.IPV6}
     assert by_name["default"].selection_status == "ambiguous"
-    assert by_name["default"].selection and by_name["default"].selection.supplementary is None
+    assert by_name["default"].selection and by_name["default"].selection.evidence is None
     assert by_name["strict"].selected_value == by_name["service"].selected_value == DHCP
     assert by_name["strict"].discovery is by_name["default"].discovery
     assert by_name["strict"].discovery is not by_name["other"].discovery
@@ -136,7 +140,7 @@ def test_failed_metadata_reused_without_poisoning_default_or_ipv4(workspace_dir,
     assert v4.selected_value == "8.8.8.8" and v4.applied
     assert strict.status == service.status == "error"
     assert strict.discovery and strict.discovery.error is None
-    assert strict.selection and strict.selection.supplementary
+    assert strict.selection and strict.selection.evidence
     assert default.selected_value == other.selected_value == DHCP
     assert default.applied and other.applied and report.has_errors()
     assert len([c for c in commands.calls if c[1] == "guest"]) == 1
@@ -218,20 +222,15 @@ def test_fake_dns_and_prune_safety(workspace_dir: Path, failure, apply) -> None:
         assert report.record_outcomes[0].status == "skipped"
 
 
-def test_unknown_policy_fails_before_provider_or_guest_even_for_modified_model(workspace_dir):
+def test_unknown_policy_fails_at_loading_boundary_before_execution(workspace_dir):
+    from dnsleaf.workspace.storage import WorkspaceLoadError, dump_yaml_data
+
     commands = SyntheticWindowsCommands()
-    loaded = load(workspace_dir, [entry()])
-    loaded.entries_file.entries[0].selection_policy = "typo"
-
-    def forbidden(_):
-        pytest.fail("provider must not be constructed for an unsupported policy")
-
-    runner = SyncRunner(
-        provider_factory=forbidden,
-        discovery_backends={"vm": PVEQGADiscoveryBackend(runner=commands)},
-    )
-    with pytest.raises(ValueError, match="unsupported selection policy"):
-        run(runner, loaded)
+    invalid = entry()
+    invalid["selection_policy"] = "typo"
+    dump_yaml_data(workspace_dir / "entries.yaml", {"config_version": 3, "entries": [invalid]})
+    with pytest.raises(WorkspaceLoadError, match="selection_policy"):
+        WorkspaceStorage().load(workspace_dir)
     assert commands.calls == []
 
 
@@ -258,4 +257,4 @@ def test_raw_agent_failure_skips_supplementary_query(workspace_dir):
     assert all(
         o.discovery and o.discovery.error_stage == "execution" for o in report.record_outcomes
     )
-    assert all(o.selection and o.selection.supplementary is None for o in report.record_outcomes)
+    assert all(o.selection and o.selection.evidence is None for o in report.record_outcomes)

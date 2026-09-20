@@ -7,7 +7,7 @@ Each entry publishes IPv4, IPv6, or both from a PVE LXC guest, a PVE VM guest ag
 the local host, or explicit static addresses. A oneshot sync and a system-level systemd timer
 handle periodic updates. Cloudflare is the only supported provider.
 
-**1.3.0 is pending release.** The public PyPI installation commands below apply after publication.
+**1.4.0 is pending release.** The public PyPI installation commands below apply after publication.
 For this pending version, install the reviewed wheel with the same `uv tool install` command.
 
 ## Install the Python tool
@@ -23,7 +23,7 @@ DNSLEAF="$(uv tool dir --bin)/dnsleaf"
 ```
 
 For pre-release review, replace `dnsleaf` in the install command with the absolute path to
-`dnsleaf-1.3.0-py3-none-any.whl`. Installing the package creates a CLI; it does not install a timer
+`dnsleaf-1.4.0-py3-none-any.whl`. Installing the package creates a CLI; it does not install a timer
 or synchronize DNS. Keep this tool environment and its Python interpreter installed for the timer.
 The module entrypoint is `python -m dnsleaf` when that Python environment contains the package.
 
@@ -50,9 +50,9 @@ zone read access. Never put the token in YAML, commands, Git, or shared reports.
 Edit `/etc/dnsleaf/example-zone/workspace.yaml`: set `zone_name`, optionally `zone_id`, and keep
 `api_token_file` pointing to the token file. Its relative path is based on the workspace directory.
 The generated YAML contains the packaged defaults; partial overrides are also supported.
-See [configuration](docs/configuration.md) for schema 4 and all settings.
+See [configuration](docs/configuration.md) for schema 5 and all settings.
 
-Add entries with the CLI, or edit `entries.yaml` (schema 2):
+Add entries with the CLI, or edit `entries.yaml` (schema 3):
 
 ```bash
 "$DNSLEAF" entry add lxc --workspace /etc/dnsleaf/example-zone \
@@ -69,16 +69,18 @@ Add entries with the CLI, or edit `entries.yaml` (schema 2):
 These names, guest IDs, and static documentation addresses are placeholders: use your own values.
 LXC discovery uses `pct exec`; VM discovery supports Linux and Windows through a working standard QEMU guest agent; local discovery uses
 `ip`. The default selection policy is unchanged. Windows Guests with multiple plausible IPv6
-addresses can explicitly opt into `--selection-policy windows-dhcpv6` on `entry add vm`,
-`entry update`, or `discover vm`. This policy also authorizes a fixed read-only PowerShell metadata
-probe through `qm guest exec`; a working network-interface query alone is insufficient.
-See [discovery](docs/discovery.md#windows-dhcpv6-opt-in) for prerequisites and refusal behavior,
+addresses can use `--selection-policy require-dhcpv6 --evidence windows-powershell` on
+`entry add vm`, `entry update`, or `discover vm`. The policy requires proven DHCPv6 eligibility;
+the evidence setting separately permits the fixed read-only PowerShell probe through `qm guest exec`.
+A working network-interface query alone is insufficient. Exact VM-ID source defaults may supply
+either field. Default selection never probes, even when evidence permission is inherited.
+See [discovery](docs/discovery.md#dhcpv6-requirement-and-windows-evidence) for prerequisites and refusal behavior,
 and [entry management](docs/entry_management.md).
 
 ## Find an existing workspace
 
-Existing dnsleaf deployments keep their directories and YAML; 1.3.0 requires no relocation or
-reinitialization. Select with `--workspace` / `-w` (including explicit `.`), then a non-empty
+Existing dnsleaf deployments keep their directories; 1.4.0 requires replacement source
+configuration but no relocation or reinitialization. Select with `--workspace` / `-w` (including explicit `.`), then a non-empty
 `DNSLEAF_WORKSPACE`, or let dnsleaf search automatically. Automatic bases are the current directory,
 its ancestors nearest to farthest including `/`, then home if not already visited. Each base checks
 its immediate child directories in lexicographic order **before the base itself**. The first directory
@@ -140,15 +142,16 @@ Workspace files are separated by purpose:
 
 ## Upgrade and uninstall
 
-Existing default-policy YAML and state require no migration for 1.3.0. Existing systemd units
-need no reinstall when upgrading in the same Python environment. If the installing interpreter or
-workspace path changes, refresh units using the updated entry:
+**1.4.0 intentionally removes the windows-dhcpv6 preset and accepts only the new source
+configuration schemas**: workspace 5 and entries 3. This is a breaking configuration change.
+Prepare and validate both replacement source files with the reviewed package before deployment.
+An operator must pause the scheduler and coordinate package/config replacement, validate and
+inspect a dry-run, then resume it. Do not blindly upgrade only the package. See the
+[1.4.0 operator procedure](docs/release-notes/1.4.0.md).
 
-```bash
-uv tool upgrade dnsleaf
-DNSLEAF="$(uv tool dir --bin)/dnsleaf"
-"$DNSLEAF" apply --workspace /etc/dnsleaf/example-zone --no-run-sync
-```
+Keep credentials, paths, managed-record/last-apply state, and installed unit names. No state reset,
+workspace purge or unit reinstall is needed when the interpreter/workspace paths remain the same.
+If those paths change independently, explicitly refresh the units using the intended interpreter.
 
 Remove the local service installation before uninstalling the Python tool:
 
@@ -160,8 +163,7 @@ uv tool uninstall dnsleaf
 Repeat local service removal for every installed workspace before removing the tool environment.
 Normal `uninstall` retains configuration, credentials, and state. To explicitly delete a workspace,
 use `uninstall --purge` while the tool is still installed. Neither form deletes remote DNS records.
-A stop/disable failure aborts cleanup and returns failure. Historical pre-dnsleaf private deployments had separate migration requirements; existing dnsleaf
-workspace schema 4 / entries schema 2 deployments need no reinitialization for 1.3.0.
+A stop/disable failure aborts cleanup and returns failure.
 
 ## Development and release
 
@@ -172,5 +174,5 @@ make build
 ```
 
 See [development](docs/development.md), [architecture](docs/architecture.md),
-[release preparation](docs/release.md), [1.3.0 notes](docs/release-notes/1.3.0.md), and
+[release preparation](docs/release.md), [1.4.0 notes](docs/release-notes/1.4.0.md), and
 [CHANGELOG](CHANGELOG.md). Author: eserie-fox. License: [MIT](LICENSE).

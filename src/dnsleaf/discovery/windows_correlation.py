@@ -1,19 +1,19 @@
-"""Pure, conservative correlation of QGA and Windows IPv6 observations."""
+"""Correlate Windows observations with raw QGA and normalize their proven facts."""
 
 from __future__ import annotations
 
 import re
 from ipaddress import IPv6Address
+from typing import Literal
 
 from dnsleaf.discovery.models import (
     AddressCandidate,
-    CandidateDisposition,
+    AddressEvidence,
+    CorrelatedEvidence,
     DiscoveryResult,
-    SelectionResult,
-    WindowsAddressEvidence,
-    WindowsMetadataResult,
 )
-from dnsleaf.models import IPAddressFamily, SelectedAddress
+from dnsleaf.discovery.windows import WindowsAddressEvidence, WindowsMetadataResult
+from dnsleaf.models import IPAddressFamily
 from dnsleaf.util.ip import unusable_ipv6_reason
 
 
@@ -91,67 +91,63 @@ def _correlate(
     return pairs
 
 
-def select_windows_dhcpv6(
-    result: DiscoveryResult,
-    *,
-    usable: list[AddressCandidate],
-    filtered_out: list[CandidateDisposition],
-    evidence: WindowsMetadataResult | None,
-) -> SelectionResult:
-    """Require consistent inventories before asserting DHCP eligibility or uniqueness."""
-
-    selection = SelectionResult(
-        target=result.target,
-        family=IPAddressFamily.IPV6,
-        policy="windows-dhcpv6",
-        status="ambiguous",
-        remaining_candidates=usable,
-        filtered_out=filtered_out,
-        supplementary=evidence,
-        reason="Windows DHCPv6 evidence is required; run the opted-in metadata probe",
-    )
-    if evidence is None:
-        return selection
-    if evidence.status == "error":
-        selection.status = "no_candidate"
-        selection.reason = f"supplementary Windows metadata failed: {evidence.error}"
-        return selection
-    if result.parsing_issues:
-        selection.reason = "incomplete QGA address parsing; cannot establish DHCPv6 uniqueness"
-        return selection
+def correlate_windows_evidence(
+    result: DiscoveryResult, metadata: WindowsMetadataResult
+) -> CorrelatedEvidence:
+    """Normalize only after the full relevant inventory has been corroborated."""
+    if metadata.status == "error":
+        return CorrelatedEvidence(
+            source="windows-powershell",
+            status="error",
+            error_stage=metadata.error_stage,
+            reason=metadata.error or "supplementary acquisition failed",
+        )
     try:
-        pairs = _correlate(usable, evidence)
+        if result.parsing_issues:
+            raise ValueError(
+                "incomplete QGA address parsing; cannot establish evidence completeness"
+            )
+        usable = [
+            c
+            for c in result.candidates
+            if c.family is IPAddressFamily.IPV6
+            and unusable_ipv6_reason(IPv6Address(c.address)) is None
+        ]
+        pairs = _correlate(usable, metadata)
     except ValueError as exc:
-        selection.reason = f"Windows DHCPv6 evidence correlation refused: {exc}"
-        return selection
-
-    eligible = []
-    for candidate, observation in pairs:
-        reason = observation.ineligible_reason
-        if reason is None:
-            eligible.append(candidate)
+        return CorrelatedEvidence(
+            source="windows-powershell",
+            status="incomplete",
+            error_stage="correlation",
+            reason=str(exc),
+        )
+    observations = []
+    for candidate, native in pairs:
+        origin: Literal["dhcp", "non_dhcp", "unknown"]
+        if native.prefix_origin == "Dhcp" and native.suffix_origin == "Dhcp":
+            origin = "dhcp"
+        elif native.prefix_origin == "Other" or native.suffix_origin == "Other":
+            origin = "unknown"
         else:
-            selection.not_selected.append(CandidateDisposition(candidate=candidate, reason=reason))
-    selection.remaining_candidates = eligible
-    if not eligible:
-        selection.status = "no_candidate"
-        selection.reason = (
-            "consistent evidence contains no eligible Windows-reported DHCPv6 address"
+            origin = "non_dhcp"
+        observations.append(
+            AddressEvidence(
+                candidate=candidate,
+                interface_identity=_hardware_identity(native.hardware_address),
+                dhcp_origin=origin,
+                preferred=native.address_state == "Preferred",
+                skip_as_source=native.skip_as_source,
+                provenance="windows-powershell",
+                source_details={
+                    "PrefixOrigin": native.prefix_origin,
+                    "SuffixOrigin": native.suffix_origin,
+                    "AddressState": native.address_state,
+                },
+            )
         )
-    elif len(eligible) > 1:
-        selection.reason = "multiple eligible Windows-reported DHCPv6 addresses; refusing to guess"
-    else:
-        candidate = eligible[0]
-        selection.status = "selected"
-        selection.reason = "unique eligible Windows-reported DHCPv6 address corroborated by QGA"
-        selection.selected = SelectedAddress(
-            target=result.target,
-            family=IPAddressFamily.IPV6,
-            address=candidate.address,
-            prefix_length=candidate.prefix_length,
-            interface=candidate.interface,
-            selection_policy="windows-dhcpv6",
-            source=candidate.source,
-            reason=selection.reason,
-        )
-    return selection
+    return CorrelatedEvidence(
+        source="windows-powershell",
+        status="complete",
+        observations=observations,
+        reason="address and interface inventories corroborated",
+    )
