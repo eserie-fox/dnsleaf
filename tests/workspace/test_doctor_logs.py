@@ -36,7 +36,10 @@ def test_permissions_mocked_without_root_chmod_assumptions(tmp_path: Path, monke
 def test_disabled_logging_checks_no_fallback_and_doctor_is_read_only(
     workspace_dir, tmp_path, monkeypatch
 ):
-    dump_yaml_data(workspace_dir / "workspace.yaml", {"dnsleaf_logging": {"file_path": None}})
+    dump_yaml_data(
+        workspace_dir / "workspace.yaml",
+        {"config_version": 5, "dnsleaf_logging": {"file_path": None}},
+    )
     before = {
         p.relative_to(workspace_dir): p.read_bytes()
         for p in workspace_dir.rglob("*")

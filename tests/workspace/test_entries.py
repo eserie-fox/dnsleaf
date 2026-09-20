@@ -100,7 +100,7 @@ def test_entry_add_local_entry(workspace_dir: Path) -> None:
 
     assert added.entry is not None
     assert added.entry.source_kind is EntrySourceKind.LOCAL
-    assert added.entry.selection_policy == "default"
+    assert added.entry.selection_policy is None
     assert added.entry.source_id is None
 
 
@@ -217,15 +217,15 @@ def test_entry_update_can_clear_proxied_override_to_inherit(workspace_dir: Path)
     assert "proxied" not in entries_payload["entries"][0]
 
 
-def test_workspace_entry_local_requires_selection_policy() -> None:
-    with pytest.raises(ValidationError, match="dynamic local entries require selection_policy"):
-        WorkspaceEntry(
-            name="self",
-            source_kind=EntrySourceKind.LOCAL,
-            fqdn="self.example.com",
-            family=EntryAddressFamily.IPV6,
-            enabled=True,
-        )
+def test_workspace_entry_local_omission_preserves_inheritance() -> None:
+    entry = WorkspaceEntry(
+        name="self",
+        source_kind=EntrySourceKind.LOCAL,
+        fqdn="self.example.com",
+        family=EntryAddressFamily.IPV6,
+        enabled=True,
+    )
+    assert entry.selection_policy is None and entry.evidence is None
 
 
 def test_workspace_entry_local_forbids_source_id() -> None:

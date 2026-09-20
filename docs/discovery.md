@@ -105,13 +105,16 @@ The selection result keeps:
 
 This makes logs and diagnostics more useful when selection is ambiguous or empty.
 
-## Windows DHCPv6 opt-in
+## DHCPv6 requirement and Windows evidence
 
-`selection_policy: windows-dhcpv6` supports VM entries with `family: ipv6` or `both`. It authorizes
-one fixed read-only supplementary Windows metadata query through **guest-exec**. It does not detect
-Guest OS automatically. Linux, LXC, local and default-policy VM discovery retain their existing
-commands. The policy is rejected for non-VM or IPv4-only entries; unknown policy names also fail
-before execution. For `both`, IPv4 uses the existing public-address selector.
+`selection_policy: require-dhcpv6` is a selection constraint, independent of evidence acquisition.
+For a VM with `family: ipv6` or `both`, `evidence: windows-powershell` explicitly permits one fixed
+read-only supplementary query through **guest-exec**. Both fields may come from exact VM-ID source
+defaults; see [configuration](configuration.md#policy-evidence-permission-and-inheritance).
+A policy does not grant execution permission. `default` never acquires or consumes evidence even
+when Windows permission is configured. `require-dhcpv6` plus `none` is invalid. Windows evidence
+is VM-only, strict selection is IPv6/both only, and there is no automatic OS detection.
+For `both`, IPv4 uses the existing public-address selector.
 
 A `/128` is a prefix length, not DHCP provenance. Two `/128` addresses may include one DHCP address
 and one RA/Random address. Default selection remains ambiguous in that case. The strict policy
@@ -139,19 +142,22 @@ Use synthetic ID 201 and an existing workspace path appropriate for your install
 
 ```bash
 dnsleaf discover vm 201 --workspace /absolute/workspace \
-  --family ipv6 --selection-policy windows-dhcpv6 --json
+  --family ipv6 --selection-policy require-dhcpv6 --evidence windows-powershell --json
 dnsleaf entry add vm --workspace /absolute/workspace --id 201 \
   --name windows-node --fqdn windows-node.example.com --family ipv6 \
-  --selection-policy windows-dhcpv6 --no-proxied
+  --selection-policy require-dhcpv6 --evidence windows-powershell --no-proxied
 dnsleaf entry update windows-node --workspace /absolute/workspace \
-  --selection-policy windows-dhcpv6
+  --selection-policy require-dhcpv6 --evidence windows-powershell
 ```
 
 Discover is read-only. Entry add/update changes local configuration and validates the complete
 proposed entries document before saving. Enrollment is a separate operator decision after inspecting
 selection evidence. `plan` and `sync-once` without `--apply` may run the fixed read-only Guest probe,
-but do not change Guest configuration or remote DNS. No deployed YAML, state or systemd migration is
-required; existing `default` entries remain unchanged.
+but do not change Guest configuration or remote DNS. Source files must use the current schemas.
+Discover never creates an updater entry, calls Cloudflare, or checks/publishes DNS. Its `enrollment`
+report lists matching enabled local entry names when a workspace exists. Outside a workspace,
+local management state is not checked. Local configuration or historical state does not prove
+current DNS publication.
 
 ### Transport and evidence contract
 
@@ -189,15 +195,25 @@ conflicting duplicates and inconsistent index/MAC mappings refuse selection. Ide
 observations of the same address on the same proven interface are deduplicated. Neither query is
 atomic with the other: refusal allows a later ordinary run to obtain fresh snapshots.
 
+The Windows adapter retains native origin/state fields. Correlation first verifies the full relevant
+inventory, then produces generic address/interface facts: DHCP/non-DHCP/unknown origin, preferred
+state, skip-as-source, and provenance. Native values remain in `source_details`; RA/Random is not
+relabeled as temporary. Missing booleans never become false. A pure OS-independent selector
+consumes these facts, without importing Windows transport models or executing commands. Unknown
+facts or incomplete correlation cannot manufacture a unique winner by dropping other candidates.
+
 Exactly one eligible address yields `selected` with reason
-`unique eligible Windows-reported DHCPv6 address corroborated by QGA`. Multiple eligible addresses
+`unique eligible DHCPv6 address proven by correlated evidence`. Multiple eligible addresses
 or insufficient/conflicting correlation evidence yield `ambiguous`; complete consistent evidence
 with no eligible DHCP address yields `no_candidate`.
 
 ### Reporting and failures
 
+JSON reports effective `strategy` policy/evidence and each field's configuration origin. Permitted
+evidence appears in the strategy; actually acquired evidence appears only on the strict selection.
 JSON retains `backend: pve_qga`, raw `candidates`, `error`, `error_stage` and `parsing_issues`.
-Each IPv6 selection includes `supplementary` status/error/stage and validated address evidence,
+Each strict IPv6 selection includes generic `evidence` status/reason/error stage and normalized
+`observations`,
 plus filtered/non-selected candidate dispositions and the correlation/selection reason. A successful
 raw query followed by failed metadata still has raw `error: null`; the supplementary error is
 reported on the affected synchronization outcome. Ordinary no-candidate/ambiguity outcomes keep
@@ -213,7 +229,7 @@ Each run shares one raw QGA snapshot and at most one supplementary snapshot per 
 including failures. Mixed default/strict entries work in either order without mutating shared raw
 candidates. Default-only VMs never run the probe. A later run always refreshes both snapshots.
 
-Protocol references checked for this implementation:
+The retained transport follows these protocol references:
 
 - [PVE qm CLI source](https://raw.githubusercontent.com/proxmox/qemu-server/master/src/PVE/CLI/qm.pm).
 - [PVE execution status decoding](https://raw.githubusercontent.com/proxmox/qemu-server/master/src/PVE/QemuServer/Agent.pm)

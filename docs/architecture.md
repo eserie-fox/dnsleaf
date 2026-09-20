@@ -10,12 +10,18 @@ More explicitly:
 
 1. The locator selects the first complete workspace; its `workspace.yaml` and `entries.yaml` are
    loaded once for logging and execution. Explicit roots remain authoritative.
-2. Dynamic entries use discovery backends to gather IPv4 and IPv6 candidates from PVE guests or the local host.
-3. The selector chooses one family-specific address or returns an explicit non-selection result.
-4. Static entries bypass discovery and selection entirely.
-5. Cloudflare current state is queried.
-6. The planner decides `create`, `update`, `delete`, or `noop`.
-7. Optional apply mutates Cloudflare state and updates workspace state files.
+2. A single typed resolver records effective policy/evidence and each field's origin for every
+   dynamic entry, including disabled ones. Entry/CLI overrides beat exact VM source defaults, then
+   package built-ins. Static entries bypass this layer.
+3. Dynamic entries use discovery backends to gather IPv4 and IPv6 candidates from PVE guests or the local host.
+4. Strict consumers demand permitted supplementary evidence. Windows acquisition retains its native
+   DTOs; correlation verifies complete QGA/Windows inventories and normalizes proven facts.
+   `policies.py` applies an OS-independent DHCP requirement; the default selector never uses evidence.
+5. The selector chooses one family-specific address or returns an explicit non-selection result.
+6. Static entries bypass discovery and selection entirely.
+7. Cloudflare current state is queried.
+8. The planner decides `create`, `update`, `delete`, or `noop`.
+9. Optional apply mutates Cloudflare state and updates workspace state files.
 
 ## Module boundaries
 
@@ -35,7 +41,8 @@ More explicitly:
 - `dnsleaf.sync`
   - performs thin orchestration for `plan` and `sync-once`
   - expands one entry into one or two concrete record flows
-  - shares one raw address snapshot per distinct dynamic source for one run only
+  - shares one raw address snapshot per distinct dynamic source and at most one demanded Windows
+    acquisition per VM per run, caching successes and failures without mutating raw results
 - `dnsleaf.systemd`
   - renders unit files
   - installs, uninstalls, and queries systemd units

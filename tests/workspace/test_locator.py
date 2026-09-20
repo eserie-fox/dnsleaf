@@ -17,7 +17,9 @@ from dnsleaf.workspace.storage import WorkspaceLoadError, WorkspaceStorage
 def candidate(path: Path, files: tuple[str, ...] = locator.REQUIRED_FILES) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     for name in files:
-        (path / name).write_text("entries: []\n" if name == "entries.yaml" else "{}\n")
+        (path / name).write_text(
+            "config_version: 3\nentries: []\n" if name == "entries.yaml" else "config_version: 5\n"
+        )
     return path
 
 

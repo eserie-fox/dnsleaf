@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dnsleaf.dns.models import TTLSetting
 from dnsleaf.models import EntryAddressFamily, EntrySourceKind
 from dnsleaf.workspace.models import EntriesFile, WorkspaceEntry
 from dnsleaf.workspace.reports import EntryMutationResult
 from dnsleaf.workspace.storage import LoadedWorkspace, WorkspaceLoadError, dump_yaml_data
+from dnsleaf.workspace.strategy import resolve_entry_strategies
 
 
 class EntryService:
@@ -29,6 +28,7 @@ class EntryService:
         family: str,
         source_id: int | None = None,
         selection_policy: str | None = None,
+        evidence: str | None = None,
         ttl: TTLSetting | None = None,
         proxied: bool | None = None,
         description: str | None = None,
@@ -39,29 +39,28 @@ class EntryService:
 
         if loaded.entries_file.get(name) is not None:
             raise WorkspaceLoadError(f"entry already exists: {name}")
-        entry = WorkspaceEntry(
-            name=name,
-            source_kind=EntrySourceKind(source_kind),
-            source_id=source_id,
-            fqdn=fqdn,
-            family=EntryAddressFamily(family),
-            selection_policy=(
-                selection_policy
-                if EntrySourceKind(source_kind) is EntrySourceKind.STATIC
-                else (selection_policy or "default")
-            ),
-            enabled=True,
-            ttl=ttl,
-            proxied=proxied,
-            description=description,
-            static_ipv4=static_ipv4,
-            static_ipv6=static_ipv6,
+        entry = WorkspaceEntry.model_validate(
+            dict(
+                name=name,
+                source_kind=EntrySourceKind(source_kind),
+                source_id=source_id,
+                fqdn=fqdn,
+                family=EntryAddressFamily(family),
+                selection_policy=selection_policy,
+                evidence=evidence,
+                enabled=True,
+                ttl=ttl,
+                proxied=proxied,
+                description=description,
+                static_ipv4=static_ipv4,
+                static_ipv6=static_ipv6,
+            )
         )
         updated = EntriesFile(
             config_version=loaded.entries_file.config_version,
             entries=[*loaded.entries_file.entries, entry],
         )
-        self._write_entries(loaded.paths.entries_file, updated)
+        self._write_entries(loaded, updated)
         return EntryMutationResult(
             operation="add",
             changed=True,
@@ -77,10 +76,13 @@ class EntryService:
         fqdn: str | None = None,
         family: str | None = None,
         selection_policy: str | None = None,
+        evidence: str | None = None,
         enabled: bool | None = None,
         ttl: TTLSetting | None = None,
         proxied: bool | None = None,
         inherit_proxied: bool = False,
+        inherit_selection_policy: bool = False,
+        inherit_evidence: bool = False,
         source_id: int | None = None,
         description: str | None = None,
         static_ipv4: str | None = None,
@@ -96,8 +98,18 @@ class EntryService:
             patch["fqdn"] = fqdn
         if family is not None:
             patch["family"] = family
-        if selection_policy is not None:
+        if inherit_selection_policy and selection_policy is not None:
+            raise ValueError("cannot set selection_policy and inherit_selection_policy together")
+        if inherit_evidence and evidence is not None:
+            raise ValueError("cannot set evidence and inherit_evidence together")
+        if inherit_selection_policy:
+            patch["selection_policy"] = None
+        elif selection_policy is not None:
             patch["selection_policy"] = selection_policy
+        if inherit_evidence:
+            patch["evidence"] = None
+        elif evidence is not None:
+            patch["evidence"] = evidence
         if enabled is not None:
             patch["enabled"] = enabled
         if ttl is not None:
@@ -119,7 +131,7 @@ class EntryService:
             updated_entry if entry.name == name else entry for entry in loaded.entries_file.entries
         ]
         self._write_entries(
-            loaded.paths.entries_file,
+            loaded,
             EntriesFile(config_version=loaded.entries_file.config_version, entries=new_entries),
         )
         return EntryMutationResult(
@@ -137,7 +149,7 @@ class EntryService:
             raise WorkspaceLoadError(f"entry not found: {name}")
         new_entries = [entry for entry in loaded.entries_file.entries if entry.name != name]
         self._write_entries(
-            loaded.paths.entries_file,
+            loaded,
             EntriesFile(config_version=loaded.entries_file.config_version, entries=new_entries),
         )
         return EntryMutationResult(
@@ -158,5 +170,8 @@ class EntryService:
 
         return self.update_entry(loaded, name=name, enabled=enabled)
 
-    def _write_entries(self, path: Path, entries: EntriesFile) -> None:
-        dump_yaml_data(path, entries.model_dump(mode="json", exclude_none=True))
+    def _write_entries(self, loaded: LoadedWorkspace, entries: EntriesFile) -> None:
+        resolve_entry_strategies(loaded.workspace_config, entries)
+        dump_yaml_data(
+            loaded.paths.entries_file, entries.model_dump(mode="json", exclude_none=True)
+        )

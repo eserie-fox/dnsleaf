@@ -22,6 +22,7 @@ class WorkspaceRenderer:
             for spec in DesiredRecordSpec.from_entry(
                 workspace=loaded.resolved_workspace,
                 entry=entry,
+                strategy=loaded.strategies.get(entry.name),
             )
         ]
         dump_json_data(

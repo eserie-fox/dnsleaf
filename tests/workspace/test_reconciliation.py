@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 from dnsleaf.dns.models import DNSRecord
@@ -25,19 +26,23 @@ def snapshot(name: str, fqdn: str, record_id: str, first: str, last: str):
 
 def test_reconciliation_explicit_time_alias_cleanup_and_input_immutability(workspace_dir: Path):
     loaded = WorkspaceStorage().load(workspace_dir)
-    loaded.entries_file = EntriesFile.from_mapping(
-        {
-            "entries": [
-                dict(
-                    name="renamed",
-                    source_kind="local",
-                    family="ipv6",
-                    fqdn="NODE.example.com.",
-                    enabled=True,
-                    selection_policy="default",
-                )
-            ]
-        }
+    loaded = replace(
+        loaded,
+        entries_file=EntriesFile.from_mapping(
+            {
+                "config_version": 3,
+                "entries": [
+                    dict(
+                        name="renamed",
+                        source_kind="local",
+                        family="ipv6",
+                        fqdn="NODE.example.com.",
+                        enabled=True,
+                        selection_policy="default",
+                    )
+                ],
+            }
+        ),
     )
     previous = ManagedRecordFile(
         records=[

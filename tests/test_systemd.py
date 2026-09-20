@@ -53,7 +53,7 @@ def test_systemd_arguments_escape_expansion_and_control_characters(raw: str, exp
 
 
 def test_service_escapes_workspace_path() -> None:
-    config = WorkspaceConfig.from_mapping({"workspace_name": "demo"})
+    config = WorkspaceConfig.from_mapping({"config_version": 5, "workspace_name": "demo"})
     resolved = config.resolve(Path('/tmp/a b/"quotes"/%n/$HOME;tail'))
     unit = SystemdManager().render_service_unit(resolved)
     assert '"/tmp/a b/\\"quotes\\"/%%n/$HOME;tail"' in unit
@@ -64,12 +64,14 @@ def test_service_escapes_workspace_path() -> None:
 @pytest.mark.parametrize("name", ["../escape", "path/unit", "bad\nname", "%n", "-unit"])
 def test_unit_names_cannot_escape_install_directory(name: str) -> None:
     with pytest.raises(ValueError, match="systemd unit name"):
-        WorkspaceConfig.from_mapping({"systemd": {"service_name": name}})
+        WorkspaceConfig.from_mapping({"config_version": 5, "systemd": {"service_name": name}})
 
 
 def test_timer_rejects_directive_injection() -> None:
     with pytest.raises(ValueError, match="control characters"):
-        WorkspaceConfig.from_mapping({"systemd": {"on_boot_sec": "1s\nUnit=other.service"}})
+        WorkspaceConfig.from_mapping(
+            {"config_version": 5, "systemd": {"on_boot_sec": "1s\nUnit=other.service"}}
+        )
 
 
 def test_install_copies_rendered_units_into_configured_directory(tmp_path: Path) -> None:
