@@ -163,6 +163,32 @@ allowed. Entry add/update/enable validates the proposed full document before ato
 Dynamic entries require `selection_policy`; guest entries also need `source_id`.
 Static entries provide `static_ipv4` and/or `static_ipv6` and bypass discovery.
 
+`selection_policy: default` keeps the existing address heuristics and never executes a supplementary
+Guest probe. `selection_policy: windows-dhcpv6` is an explicit opt-in for `source_kind: vm` with
+`family: ipv6` or `both`. It requires Windows PowerShell 5.1, NetTCPIP/NetAdapter CIM access, and PVE/QGA
+guest-exec capability in addition to network-get-interfaces. With `both`, IPv4 retains default public
+address filtering. Unknown policies and invalid source/family combinations fail before Guest commands
+or provider planning, including entry add/update before their atomic file replacement.
+
+```yaml
+config_version: 2
+entries:
+  - name: windows-node
+    source_kind: vm
+    source_id: 201
+    family: ipv6
+    fqdn: windows-node.example.com
+    enabled: true
+    selection_policy: windows-dhcpv6
+    proxied: false
+```
+
+A `/128` does not establish DHCP provenance. The strict policy requires matched QGA address/MAC
+identity and Windows `Dhcp` prefix/suffix origins, `Preferred` state and boolean `SkipAsSource: false`.
+It never falls back to default IPv6 heuristics. See [discovery](discovery.md#windows-dhcpv6-opt-in)
+for correlation, error diagnostics and per-family partial success. Existing default-policy files,
+state schemas and systemd units do not require migration or reinstall for this opt-in feature.
+
 Entry `ttl` and `proxied` values override workspace defaults. Omitted or null entry values inherit
 the workspace default. When the **resolved** proxy value is null, updates omit `proxied` and retain
 the remote setting. A currently proxied remote record's forced auto TTL is also preserved.
@@ -196,3 +222,8 @@ planning remain independent per entry. The next run queries again, even with the
 comes from shared package resources, so older YAML needs no new field. The limit does not apply to
 systemd lifecycle commands. A timed-out Guest yields error outcomes, independent entries continue,
 and configured targets stay protected from prune. No repeated automatic attempts occur in that run.
+
+For opted-in VMs, one supplementary metadata result (success or failure) is also shared within a
+single synchronization run. It uses the same `discovery.timeout_seconds` limit. Default-only VMs
+perform no supplementary query, and the next run always obtains fresh evidence. `plan` and dry-run
+may execute the fixed read-only Guest probe; they do not change Guest settings or remote DNS.

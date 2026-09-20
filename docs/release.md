@@ -1,6 +1,6 @@
 # Release preparation
 
-Version **1.2.0 is pending release**. These instructions prepare a public package; they do not
+Version **1.3.0 is pending release**. These instructions prepare a public package; they do not
 assert that PyPI projects, publishers, GitHub environments, or branch protection already exist.
 
 ## Identity and build
@@ -19,7 +19,7 @@ uv run twine check dist/*
 ```
 
 Use a clean output directory for release artifacts. Confirm wheel/sdist metadata, MIT license,
-entrypoint, author, URLs, defaults and templates. Inspect every member for accidental workspaces,
+entrypoint, author, URLs, defaults, templates and the readable `probes/windows_ipv6.ps1` resource. Inspect every member for accidental workspaces,
 credentials, logs, cache files, and stale packages. In a fresh environment outside the checkout,
 install the wheel without editable mode or a source PYTHONPATH. Verify `dnsleaf` and
 `python -m dnsleaf` help/version, initialize a workspace, supply an explicit test-only token file,
@@ -71,8 +71,16 @@ Local unit tests with fakes do not establish PVE or live Cloudflare acceptance.
 
 The 1.0.x notes record pre-rename private work, whose old-tool migration requirements are historical.
 Existing dnsleaf schema 4 / entries schema 2 / state schema 1 deployments need no configuration
-migration, relocation or reinitialization for 1.2.0. Existing explicit systemd workspace paths remain
+migration, relocation or reinitialization for 1.3.0. Upgrading in the same Python environment needs no systemd unit reinstall. Existing explicit systemd workspace paths remain
 valid. Validate enabled DNS-target uniqueness before syncing after upgrade.
 
 After review and account setup, manually run the TestPyPI workflow. Verify its published artifacts
 before creating the intended PyPI tag. Neither a local build nor this document implies publication.
+
+For 1.3.0, verify the policy's valid/invalid VM-family combinations and fixed probe resource in both
+installed wheels (original and rebuilt sdist). Feature smoke tests must inject fake transports and
+providers. Live acceptance is separate: with operator-available Windows test VMs, confirm raw QGA
+communication, run strict IPv6 discovery, compare contemporaneous Windows provenance and adapter
+identity, then inspect a dry-run before separately authorized DNS writes. Also retest Guests where
+the old selector picked a unique `/128`: that never established DHCP provenance. Do not start VMs or
+change their power state as part of release validation. See [1.3.0 notes](release-notes/1.3.0.md).

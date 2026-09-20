@@ -43,6 +43,7 @@ def parse_qga_interfaces(
     payload: str | dict[str, Any] | list[dict[str, Any]],
     *,
     source: str = "pve_qga",
+    issues: list[str] | None = None,
 ) -> list[AddressCandidate]:
     """Parse `qm agent ... network-get-interfaces` output."""
 
@@ -54,6 +55,7 @@ def parse_qga_interfaces(
                 interface_data,
                 interface_index=interface_index,
                 source=source,
+                issues=issues,
             )
         )
     return candidates
@@ -82,9 +84,11 @@ def _parse_qga_interface_entry(
     *,
     interface_index: int,
     source: str,
+    issues: list[str] | None,
 ) -> list[AddressCandidate]:
     if not isinstance(interface_data, dict):
-        LOGGER.warning(
+        _qga_warning(
+            issues,
             "Skipping QGA interface entry at index %s: expected object, got %s",
             interface_index,
             type(interface_data).__name__,
@@ -99,7 +103,8 @@ def _parse_qga_interface_entry(
     )
     ip_addresses = interface_data.get("ip-addresses", [])
     if not isinstance(ip_addresses, list):
-        LOGGER.warning(
+        _qga_warning(
+            issues,
             "Skipping QGA interface %s: ip-addresses must be a list",
             interface_name,
         )
@@ -112,6 +117,8 @@ def _parse_qga_interface_entry(
             address_index=address_index,
             ip_data=ip_data,
             source=source,
+            issues=issues,
+            hardware_address=interface_data.get("hardware-address"),
         )
         if candidate is not None:
             candidates.append(candidate)
@@ -123,10 +130,13 @@ def _parse_qga_address_item(
     *,
     address_index: int,
     ip_data: Any,
+    hardware_address: Any,
     source: str,
+    issues: list[str] | None,
 ) -> AddressCandidate | None:
     if not isinstance(ip_data, dict):
-        LOGGER.warning(
+        _qga_warning(
+            issues,
             "Skipping QGA interface %s address item %s: expected object, got %s",
             interface_name,
             address_index,
@@ -136,12 +146,14 @@ def _parse_qga_address_item(
 
     ip_address_type = ip_data.get("ip-address-type")
     if not isinstance(ip_address_type, str) or ip_address_type not in {"ipv4", "ipv6"}:
+        _qga_warning(issues, "Skipping QGA address item %s: invalid address type", address_index)
         return None
 
     address = ip_data.get("ip-address")
     prefix = ip_data.get("prefix")
     if not isinstance(address, str) or type(prefix) is not int:
-        LOGGER.warning(
+        _qga_warning(
+            issues,
             "Skipping QGA interface %s address item %s: %s entry is missing address/prefix",
             interface_name,
             address_index,
@@ -152,7 +164,8 @@ def _parse_qga_address_item(
     try:
         parsed_address, prefix_length, family = parse_ip_interface(f"{address}/{prefix}")
     except ValueError as exc:
-        LOGGER.warning(
+        _qga_warning(
+            issues,
             "Skipping QGA interface %s address item %s: %s",
             interface_name,
             address_index,
@@ -161,11 +174,11 @@ def _parse_qga_address_item(
         return None
 
     if family != ip_address_type:
-        LOGGER.warning("Skipping QGA address item %s: address family mismatch", address_index)
+        _qga_warning(issues, "Skipping QGA address item %s: address family mismatch", address_index)
         return None
     if "%" in address and not parsed_address.is_link_local:
-        LOGGER.warning(
-            "Skipping QGA address item %s: scope on non-link-local address", address_index
+        _qga_warning(
+            issues, "Skipping QGA address item %s: scope on non-link-local address", address_index
         )
         return None
 
@@ -175,9 +188,16 @@ def _parse_qga_address_item(
         address=str(parsed_address).split("%", 1)[0],
         prefix_length=prefix_length,
         source=source,
+        hardware_address=hardware_address if isinstance(hardware_address, str) else None,
         scope=None,
         flags=[],
     )
+
+
+def _qga_warning(issues: list[str] | None, message: str, *args: object) -> None:
+    LOGGER.warning(message, *args)
+    if issues is not None:
+        issues.append(message % args)
 
 
 def _normalize_ip_addr_records(output: str) -> list[tuple[str, str]]:

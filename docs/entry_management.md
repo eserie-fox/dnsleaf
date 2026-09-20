@@ -27,6 +27,9 @@ Validation rules:
 - `source_kind=lxc|vm` requires `source_id` and `selection_policy`
 - `source_kind=local` requires `selection_policy` and forbids `source_id`
 - `source_kind=static` forbids `source_id` and `selection_policy`
+- `selection_policy=default` keeps existing selection and performs no supplementary Guest execution
+- `selection_policy=windows-dhcpv6` requires `source_kind=vm` and `family=ipv6|both`; it explicitly
+  opts into the fixed read-only Windows metadata probe, with no IPv6 heuristic fallback
 - `family=ipv4` manages one `A` record flow
 - `family=ipv6` manages one `AAAA` record flow
 - `family=both` manages two independent record flows
@@ -69,6 +72,13 @@ dnsleaf entry add vm  --workspace ./workspaces/example-zone --id 201 --fqdn vm.e
 dnsleaf entry add lxc --workspace ./workspaces/example-zone --id 101 --fqdn host.example.com --name web --family both --ttl auto
 dnsleaf entry add lxc --workspace ./workspaces/example-zone --id 101 --fqdn host.example.com --name web --family both --no-proxied
 ```
+
+For an explicitly verified Windows DHCPv6 target, add `--selection-policy windows-dhcpv6` to
+`entry add vm`, or use `entry update guest --selection-policy windows-dhcpv6`. Verify first with
+`discover vm 201 --family ipv6 --selection-policy windows-dhcpv6 --json` against your workspace.
+This requires guest-exec capability as well as QGA address discovery; see
+[prerequisites and diagnostics](discovery.md#windows-dhcpv6-opt-in). Unknown policy names and
+incompatible edits fail validation without replacing `entries.yaml`.
 
 ### Add static entries
 

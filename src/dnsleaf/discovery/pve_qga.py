@@ -39,11 +39,20 @@ class PVEQGADiscoveryBackend(DiscoveryBackend):
         args = [self._qm_bin, "agent", str(target.id), "network-get-interfaces"]
         try:
             output = self._runner(args, timeout=self._timeout).stdout
-            candidates = parse_qga_interfaces(output, source=self.name)
-            return DiscoveryResult(target=target, backend=self.name, candidates=candidates)
         except Exception as exc:
             return DiscoveryResult(
                 target=target,
                 backend=self.name,
                 error=str(exc),
+                error_stage="execution",
             )
+        issues: list[str] = []
+        try:
+            candidates = parse_qga_interfaces(output, source=self.name, issues=issues)
+        except (ValueError, TypeError) as exc:
+            return DiscoveryResult(
+                target=target, backend=self.name, error=str(exc), error_stage="parsing"
+            )
+        return DiscoveryResult(
+            target=target, backend=self.name, candidates=candidates, parsing_issues=issues
+        )

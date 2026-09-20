@@ -59,7 +59,7 @@ include = ["dnsleaf", "dnsleaf.*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-dnsleaf = ["config_defaults/*.json", "templates/*.json", "templates/*.txt"]
+dnsleaf = ["config_defaults/*.json", "templates/*.json", "templates/*.txt", "probes/*.ps1"]
 
 [tool.setuptools.dynamic]
 version = {attr = "dnsleaf.version.__version__"}
