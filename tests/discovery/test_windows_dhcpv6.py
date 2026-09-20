@@ -4,6 +4,7 @@ import pytest
 
 from dnsleaf.discovery.selectors import select_address
 from dnsleaf.discovery.windows import parse_windows_metadata
+from dnsleaf.discovery.windows_correlation import correlate_windows_evidence
 from dnsleaf.models import IPAddressFamily
 from tests.windows_fixtures import (
     DHCP,
@@ -28,12 +29,16 @@ def test_reported_two_128_limitation_remains_ambiguous_by_default() -> None:
 
 
 def strict(raw=None, records=None):
+    raw = raw if raw is not None else synthetic_inventory()
     return select_address(
-        raw if raw is not None else synthetic_inventory(),
+        raw,
         family=IPAddressFamily.IPV6,
-        policy="windows-dhcpv6",
-        windows_evidence=parse_windows_metadata(
-            metadata_wire(records if records is not None else synthetic_metadata())
+        policy="require-dhcpv6",
+        evidence=correlate_windows_evidence(
+            raw,
+            parse_windows_metadata(
+                metadata_wire(records if records is not None else synthetic_metadata())
+            ),
         ),
     )
 
@@ -45,12 +50,15 @@ def test_strict_selects_corroborated_dhcp_and_preserves_snapshots() -> None:
     evidence = parse_windows_metadata(metadata_wire(records))
     original_evidence = evidence.model_dump()
     selected = select_address(
-        raw, family=IPAddressFamily.IPV6, policy="windows-dhcpv6", windows_evidence=evidence
+        raw,
+        family=IPAddressFamily.IPV6,
+        policy="require-dhcpv6",
+        evidence=correlate_windows_evidence(raw, evidence),
     )
     assert selected.selected and selected.selected.address == DHCP
-    assert selected.reason == "unique eligible Windows-reported DHCPv6 address corroborated by QGA"
+    assert selected.reason == "unique eligible DHCPv6 address proven by correlated evidence"
     assert {c.candidate.address for c in selected.not_selected} == {RANDOM, LINK}
-    assert "RouterAdvertisement/Random" in selected.not_selected[0].reason
+    assert "does not satisfy DHCPv6" in selected.not_selected[0].reason
     assert {c.reason for c in selected.filtered_out} == {"loopback", "link_local"}
     assert raw.model_dump() == original
     assert evidence.model_dump() == original_evidence
@@ -60,7 +68,7 @@ def test_strict_selects_corroborated_dhcp_and_preserves_snapshots() -> None:
 def test_one_raw_128_is_not_proof_of_dhcp() -> None:
     raw = synthetic_inventory()
     raw.candidates = raw.candidates[:1]
-    result = select_address(raw, family=IPAddressFamily.IPV6, policy="windows-dhcpv6")
+    result = select_address(raw, family=IPAddressFamily.IPV6, policy="require-dhcpv6")
     assert result.selected is None and result.status == "ambiguous"
     assert "evidence is required" in result.reason
     assert strict(raw, []).selected is None
@@ -134,8 +142,8 @@ def test_untrusted_field_is_never_confirmed_evidence(field, value) -> None:
     records[1][field] = value  # A confirmed DHCP plus an unclassified second candidate.
     selection = strict(records=records)
     assert selection.selected is None
-    assert selection.supplementary and selection.supplementary.status == "error"
-    assert field in (selection.supplementary.error or "")
+    assert selection.evidence and selection.evidence.status == "error"
+    assert field in (selection.evidence.reason)
 
 
 @pytest.mark.parametrize("field", list(synthetic_metadata()[0]))
@@ -195,7 +203,7 @@ def test_snapshot_or_identity_inconsistency_refuses_selection(change) -> None:
         raw.parsing_issues = ["invalid QGA address item"]
     selection = strict(raw, records)
     assert selection.status == "ambiguous" and selection.selected is None
-    assert "correlation refused" in selection.reason or "parsing" in selection.reason
+    assert "correlation" in selection.reason or "parsing" in selection.reason
 
 
 def test_identical_duplicates_and_normalized_identity_are_safe() -> None:
@@ -234,9 +242,14 @@ def test_probe_failure_never_falls_back_to_single_raw_128() -> None:
     raw.candidates = raw.candidates[:1]
     failed = parse_windows_metadata('{"pid": 77}')
     selection = select_address(
-        raw, family=IPAddressFamily.IPV6, policy="windows-dhcpv6", windows_evidence=failed
+        raw,
+        family=IPAddressFamily.IPV6,
+        policy="require-dhcpv6",
+        evidence=correlate_windows_evidence(raw, failed),
     )
-    assert selection.selected is None and selection.supplementary == failed
+    assert (
+        selection.selected is None and selection.evidence and selection.evidence.status == "error"
+    )
 
 
 def test_complete_empty_inventory_has_no_candidate() -> None:
@@ -251,3 +264,29 @@ def test_duplicate_raw_hardware_on_different_interfaces_refuses() -> None:
     raw.candidates[1].interface = "Different adapter"
     selection = strict(raw)
     assert selection.status == "ambiguous" and "different interfaces" in selection.reason
+
+
+@pytest.mark.parametrize(
+    "prefix,suffix,origin,status",
+    [
+        ("Dhcp", "Random", "non_dhcp", "no_candidate"),
+        ("RouterAdvertisement", "Dhcp", "non_dhcp", "no_candidate"),
+        ("Other", "Dhcp", "unknown", "ambiguous"),
+        ("Dhcp", "Other", "unknown", "ambiguous"),
+    ],
+)
+def test_normalization_preserves_partial_and_unknown_origins(prefix, suffix, origin, status):
+    raw = synthetic_inventory()
+    records = synthetic_metadata()
+    records[0].update(PrefixOrigin=prefix, SuffixOrigin=suffix)
+    normalized = correlate_windows_evidence(raw, parse_windows_metadata(metadata_wire(records)))
+    fact = normalized.observations[0]
+    assert normalized.status == "complete" and fact.dhcp_origin == origin
+    assert fact.source_details["PrefixOrigin"] == prefix
+    assert fact.source_details["SuffixOrigin"] == suffix
+    assert (
+        select_address(
+            raw, family=IPAddressFamily.IPV6, policy="require-dhcpv6", evidence=normalized
+        ).status
+        == status
+    )

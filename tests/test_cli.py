@@ -217,10 +217,11 @@ class FakeDebugRunner:
         target: TargetRef,
         *,
         families,
-        policy: str,
+        strategy,
         loaded_workspace=None,
     ):
         _ = loaded_workspace
+        policy = strategy.selection_policy
         discovery = DiscoveryResult(
             target=target,
             backend="fake",

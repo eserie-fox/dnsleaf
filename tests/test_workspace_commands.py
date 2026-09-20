@@ -237,7 +237,10 @@ def test_explicit_dot_overrides_environment_in_command(tmp_path, monkeypatch):
 
 
 def test_stdout_logging_does_not_corrupt_json(workspace_dir, monkeypatch):
-    dump_yaml_data(workspace_dir / "workspace.yaml", {"dnsleaf_logging": {"stream": "stdout"}})
+    dump_yaml_data(
+        workspace_dir / "workspace.yaml",
+        {"config_version": 5, "dnsleaf_logging": {"stream": "stdout"}},
+    )
     result = runner.invoke(app, ["validate", "-w", str(workspace_dir), "--json"])
     assert result.exit_code == 0
     assert json.loads(result.stdout)["entry_count"] == 0
@@ -250,7 +253,7 @@ def test_runtime_validation_failure_names_selected_root_and_field_without_fallba
     first = scaffold_workspace(tmp_path, "a-invalid")
     scaffold_workspace(tmp_path, "z-valid")
     external = tmp_path / "missing-external-token"
-    dump_yaml_data(first / "workspace.yaml", {"api_token_file": str(external)})
+    dump_yaml_data(first / "workspace.yaml", {"config_version": 5, "api_token_file": str(external)})
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["validate", "--json"])
     assert result.exit_code == 1

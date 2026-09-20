@@ -5,12 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import math
-from typing import Any, NoReturn
+from ipaddress import IPv6Address
+from typing import Any, Literal, NoReturn
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from dnsleaf.config.resources import read_text
-from dnsleaf.discovery.models import WindowsAddressEvidence, WindowsMetadataResult
 from dnsleaf.models import TargetKind, TargetRef
 from dnsleaf.util.process import (
     CommandExecutionError,
@@ -18,6 +18,49 @@ from dnsleaf.util.process import (
     ProcessRunner,
     run_command,
 )
+
+
+class WindowsAddressEvidence(BaseModel):
+    """One Windows-reported IPv6 observation, before correlation with QGA."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+    address: str = Field(alias="IPAddress")
+    prefix_length: int = Field(alias="PrefixLength", ge=0, le=128)
+    interface_index: int = Field(alias="InterfaceIndex", ge=1)
+    interface_alias: str = Field(alias="InterfaceAlias")
+    hardware_address: str | None = Field(alias="HardwareAddress")
+    prefix_origin: Literal["Other", "Manual", "WellKnown", "Dhcp", "RouterAdvertisement"] = Field(
+        alias="PrefixOrigin"
+    )
+    suffix_origin: Literal["Other", "Manual", "WellKnown", "Dhcp", "Link", "Random"] = Field(
+        alias="SuffixOrigin"
+    )
+    address_state: Literal["Invalid", "Tentative", "Duplicate", "Deprecated", "Preferred"] = Field(
+        alias="AddressState"
+    )
+    skip_as_source: bool = Field(alias="SkipAsSource")
+
+    @field_validator("address")
+    @classmethod
+    def _normalize_ipv6(cls, value: str) -> str:
+        address = IPv6Address(value)
+        if "%" in value and not address.is_link_local:
+            raise ValueError("scope identifier on non-link-local IPv6")
+        return str(address).split("%", 1)[0]
+
+
+class WindowsMetadataResult(BaseModel):
+    """Supplementary probe outcome; it never replaces the raw QGA inventory."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    source: Literal["qm_guest_exec"] = "qm_guest_exec"
+    status: Literal["ok", "error"]
+    addresses: list[WindowsAddressEvidence] = Field(default_factory=list)
+    error_stage: Literal["execution", "protocol"] | None = None
+    error: str | None = None
+
 
 PROBE_RESOURCE = "pkg://dnsleaf/probes/windows_ipv6.ps1"
 

@@ -7,12 +7,12 @@ from ipaddress import IPv4Address, IPv6Address, ip_address
 from dnsleaf.discovery.models import (
     AddressCandidate,
     CandidateDisposition,
+    CorrelatedEvidence,
     DiscoveryResult,
     SelectionResult,
-    WindowsMetadataResult,
 )
-from dnsleaf.discovery.windows_selection import select_windows_dhcpv6
-from dnsleaf.models import IPAddressFamily, SelectedAddress, TargetKind
+from dnsleaf.discovery.policies import select_required_dhcpv6
+from dnsleaf.models import IPAddressFamily, SelectedAddress
 from dnsleaf.util.ip import (
     has_embedded_eui64,
     looks_temporary_or_privacy,
@@ -28,15 +28,12 @@ def select_address(
     *,
     family: IPAddressFamily,
     policy: str = "default",
-    windows_evidence: WindowsMetadataResult | None = None,
+    evidence: CorrelatedEvidence | None = None,
 ) -> SelectionResult:
     """Select the best DNS address for one family from discovery candidates."""
 
-    if policy not in {"default", "windows-dhcpv6"}:
+    if policy not in {"default", "require-dhcpv6"}:
         raise ValueError(f"unsupported selection policy: {policy}")
-    if policy == "windows-dhcpv6" and result.target.kind is not TargetKind.VM:
-        raise ValueError("windows-dhcpv6 requires a VM target")
-
     candidates = [candidate for candidate in result.candidates if candidate.family is family]
     filtered_out: list[CandidateDisposition] = []
     usable: list[AddressCandidate] = []
@@ -47,9 +44,9 @@ def select_address(
             continue
         usable.append(candidate)
 
-    if policy == "windows-dhcpv6" and family is IPAddressFamily.IPV6:
-        return select_windows_dhcpv6(
-            result, usable=usable, filtered_out=filtered_out, evidence=windows_evidence
+    if policy == "require-dhcpv6" and family is IPAddressFamily.IPV6:
+        return select_required_dhcpv6(
+            result, usable=usable, filtered_out=filtered_out, evidence=evidence
         )
 
     if not usable:

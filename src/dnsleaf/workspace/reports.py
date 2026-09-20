@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
+from dnsleaf.config.strategy import ResolvedStrategy
 from dnsleaf.discovery.models import DiscoveryResult, SelectionResult
 from dnsleaf.dns.models import DesiredRecord, DNSRecord, SyncPlan, cloudflare_effective_ttl
 from dnsleaf.models import EntrySourceKind, IPAddressFamily
@@ -26,7 +27,7 @@ class DesiredRecordSpec(BaseModel):
     proxied: StrictBool | None = None
     source_kind: EntrySourceKind
     source_id: int | None
-    selection_policy: str | None
+    strategy: ResolvedStrategy | None
     enabled: StrictBool
     value_source: Literal["dynamic", "static"]
     static_value: str | None = None
@@ -38,6 +39,7 @@ class DesiredRecordSpec(BaseModel):
         *,
         workspace: ResolvedWorkspace,
         entry: WorkspaceEntry,
+        strategy: ResolvedStrategy | None,
     ) -> list[DesiredRecordSpec]:
         """Build renderable desired-record specs for one entry."""
 
@@ -54,7 +56,7 @@ class DesiredRecordSpec(BaseModel):
                 proxied=proxied,
                 source_kind=entry.source_kind,
                 source_id=entry.source_id,
-                selection_policy=entry.selection_policy,
+                strategy=strategy,
                 enabled=entry.enabled,
                 value_source="static" if entry.source_kind is EntrySourceKind.STATIC else "dynamic",
                 static_value=entry.static_value_for_family(family),
@@ -217,6 +219,7 @@ class RecordSyncOutcome(BaseModel):
     fqdn: str
     record_type: str
     value_source: Literal["dynamic", "static"]
+    strategy: ResolvedStrategy | None = None
     discovery: DiscoveryResult | None = None
     selection: SelectionResult | None = None
     selection_status: str | None = None

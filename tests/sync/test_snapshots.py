@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -63,14 +64,18 @@ def test_raw_snapshot_reused_per_source_and_refreshed_each_run(
     workspace_dir: Path, kind, source_id
 ):
     loaded = WorkspaceStorage().load(workspace_dir)
-    loaded.entries_file = EntriesFile.from_mapping(
-        {
-            "entries": [
-                entry("node", "both", source_id, kind),
-                entry("service", "ipv6", source_id, kind),
-                entry("other", "ipv4", 102),
-            ]
-        }
+    loaded = replace(
+        loaded,
+        entries_file=EntriesFile.from_mapping(
+            {
+                "config_version": 3,
+                "entries": [
+                    entry("node", "both", source_id, kind),
+                    entry("service", "ipv6", source_id, kind),
+                    entry("other", "ipv4", 102),
+                ],
+            }
+        ),
     )
     backend = ChangingBackend()
     provider = FakeDNSProvider()
@@ -95,14 +100,18 @@ def test_raw_snapshot_reused_per_source_and_refreshed_each_run(
 
 def test_timed_out_guest_reused_and_other_guest_processed_without_prune(workspace_dir: Path):
     loaded = WorkspaceStorage().load(workspace_dir)
-    loaded.entries_file = EntriesFile.from_mapping(
-        {
-            "entries": [
-                entry("node", "ipv6"),
-                entry("service", "both"),
-                entry("other", "ipv4", 102),
-            ]
-        }
+    loaded = replace(
+        loaded,
+        entries_file=EntriesFile.from_mapping(
+            {
+                "config_version": 3,
+                "entries": [
+                    entry("node", "ipv6"),
+                    entry("service", "both"),
+                    entry("other", "ipv4", 102),
+                ],
+            }
+        ),
     )
     calls = []
 

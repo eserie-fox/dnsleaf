@@ -72,7 +72,10 @@ reinitialization. Systemd retains an explicit absolute workspace and the install
 `dnsleaf.config.outside_workspace` provides the same API for internal defaults and JSON overrides;
 it is not a separate operator-facing configuration layer.
 
-Loading always reads package JSON defaults, reads the override, merges, then validates with
+External files must explicitly declare current integer versions: workspace **5**, entries **3**.
+Missing, old, unknown, boolean or otherwise invalid versions fail before merging or execution.
+Files are never converted or rewritten on read. Package defaults/scaffolding construct current models.
+After this version check, loading reads package JSON defaults, reads the override, merges, then validates with
 Pydantic v2. Mappings merge recursively. Lists, scalars, booleans, and null replace their base value;
 lists never concatenate. Unknown fields and wrongly typed operational scalars fail validation.
 YAML TTL values must be integers or `auto`, not quoted numeric strings. Error messages omit input
@@ -82,6 +85,7 @@ The authoritative defaults are:
 
 - [`workspace.json`](../src/dnsleaf/config_defaults/workspace.json)
 - [`discovery.json`](../src/dnsleaf/config_defaults/discovery.json) (shared discovery limit)
+- [`strategy.json`](../src/dnsleaf/config_defaults/strategy.json) (built-in policy and evidence)
 - [`entries.json`](../src/dnsleaf/config_defaults/entries.json)
 - [`outside_workspace.json`](../src/dnsleaf/config_defaults/outside_workspace.json)
 
@@ -91,12 +95,12 @@ basename used as `workspace_name`. Resources ship in both wheel and sdist and us
 
 ## Workspace settings
 
-`config_version` is **4**, identifying the schema, independently of the Python package version.
-Earlier schemas and unknown fields are rejected. `entries.yaml` retains schema **2**.
+`config_version` is **5**, identifying the schema, independently of the Python package version.
+Earlier schemas and unknown fields are rejected. `entries.yaml` uses schema **3**.
 A minimal override might contain:
 
 ```yaml
-config_version: 4
+config_version: 5
 workspace_name: example-zone
 zone_name: example.com
 api_token_file: secrets/cloudflare_api_token.txt
@@ -113,6 +117,7 @@ All other fields come from the package defaults. `init` writes a full initial co
 | `default_ttl` | Positive integer seconds or `auto` (Cloudflare API value `1`) |
 | `default_proxied` | `true` or `false` manages proxy state; `null` preserves it |
 | `discovery.timeout_seconds` | Finite positive per-command address-discovery timeout; default `30.0` seconds |
+| `source_defaults` | Exact VM-ID strategy groups; package default is `[]` |
 | `paths` | Discovery commands, systemctl command, system unit directory |
 | `systemd` | Optional unit names, timer intervals, immediate-sync preference |
 | `apply.prune_managed_records` | Default prune preference; package default is disabled |
@@ -140,7 +145,7 @@ Empty, comment-only, null, or incomplete documents (including `{}`) fail validat
 planning, regardless of the prune setting. To intentionally manage no desired records, use:
 
 ```yaml
-config_version: 2
+config_version: 3
 entries: []
 ```
 
@@ -160,18 +165,36 @@ normalized FQDN + record type: FQDN comparison ignores case and trailing dots, a
 canonicalized. `family: both` owns both A and AAAA and conflicts with either overlapping family.
 Separate A/AAAA entries at one name, multiple names from one Guest, and disabled duplicates are
 allowed. Entry add/update/enable validates the proposed full document before atomic replacement.
-Dynamic entries require `selection_policy`; guest entries also need `source_id`.
-Static entries provide `static_ipv4` and/or `static_ipv6` and bypass discovery.
+Guest entries need `source_id`; local entries do not. Static entries provide `static_ipv4` and/or
+`static_ipv6`, bypass discovery, and must not specify non-null policy/evidence fields.
 
-`selection_policy: default` keeps the existing address heuristics and never executes a supplementary
-Guest probe. `selection_policy: windows-dhcpv6` is an explicit opt-in for `source_kind: vm` with
-`family: ipv6` or `both`. It requires Windows PowerShell 5.1, NetTCPIP/NetAdapter CIM access, and PVE/QGA
-guest-exec capability in addition to network-get-interfaces. With `both`, IPv4 retains default public
-address filtering. Unknown policies and invalid source/family combinations fail before Guest commands
-or provider planning, including entry add/update before their atomic file replacement.
+### Policy, evidence permission, and inheritance
+
+Dynamic entries have independent nullable `selection_policy` and `evidence` overrides. Omitted or
+null fields inherit. Explicit `default` and `none` override inherited settings; empty strings and
+unknown names are invalid. There is exactly one source-default layer:
+
+| Priority | Policy field | Evidence field | Report origin |
+| --- | --- | --- | --- |
+| 1 | Non-null entry / discover CLI override | Non-null entry / discover CLI override | `entry` / `cli` |
+| 2 | Matching VM source-default field | Matching VM source-default field | `source_default` |
+| 3 | `default` | `none` | `built_in` |
+
+The fields resolve independently. `default` uses the conservative existing selector and never
+acquires or consumes supplementary evidence. `require-dhcpv6` requires proven DHCP origin,
+preferred state and skip-as-source=false for exactly one usable global IPv6. It requires `ipv6`
+or `both`; with `both`, IPv4 retains its default public-address filter.
+
+`windows-powershell` permits the fixed read-only Windows probe through PVE/QGA guest-exec, for VM
+sources only. Permission does not itself demand execution: `default` plus `windows-powershell`
+performs no probe, including for IPv4-only VMs. `none` disallows supplementary acquisition.
+`require-dhcpv6` plus `none` is invalid: no current raw backend supplies the required facts.
+There is no Linux DHCP provenance producer, OS detection, or implicit probe permission.
+
+A complete explicit pair in `entries.yaml`:
 
 ```yaml
-config_version: 2
+config_version: 3
 entries:
   - name: windows-node
     source_kind: vm
@@ -179,15 +202,46 @@ entries:
     family: ipv6
     fqdn: windows-node.example.com
     enabled: true
-    selection_policy: windows-dhcpv6
+    selection_policy: require-dhcpv6
+    evidence: windows-powershell
     proxied: false
 ```
 
-A `/128` does not establish DHCP provenance. The strict policy requires matched QGA address/MAC
-identity and Windows `Dhcp` prefix/suffix origins, `Preferred` state and boolean `SkipAsSource: false`.
-It never falls back to default IPv6 heuristics. See [discovery](discovery.md#windows-dhcpv6-opt-in)
-for correlation, error diagnostics and per-family partial success. Existing default-policy files,
-state schemas and systemd units do not require migration or reinstall for this opt-in feature.
+Alternatively, this complete minimal `workspace.yaml` supplies defaults:
+
+```yaml
+config_version: 5
+workspace_name: example-zone
+zone_name: example.com
+api_token_file: secrets/cloudflare_api_token.txt
+source_defaults:
+  - source_kind: vm
+    source_ids: [201, 202, 203]
+    selection_policy: require-dhcpv6
+    evidence: windows-powershell
+```
+
+The entry above can omit both strategy fields to inherit them. Each group must list non-empty,
+strict positive integer IDs (not booleans), with no repetitions within or overlaps across groups.
+Only `source_kind: vm` is allowed. A group supplies at least one non-null strategy field; a partial
+group can be completed by an entry override. Unknown fields are rejected. Declarations do not
+enumerate VMs or enroll DNS entries, and unused or disabled-only sources cause no discovery.
+
+Effective combinations are validated for every declared dynamic entry, including disabled ones.
+An IPv4-only consumer inheriting strict policy must explicitly override it to `default`.
+An entry may override inherited evidence `none` with `windows-powershell`; defaults are not an
+administrator deny rule. Overriding evidence to `none` while retaining strict policy fails.
+Two entries for one VM may use different effective policies.
+
+`entry add` preserves omission. `entry update --inherit-selection-policy` and `--inherit-evidence`
+clear overrides; setting and clearing the same field together is invalid. Unrelated edits do not
+flatten inheritance. The complete proposed entries document and effective settings are validated
+before atomic replacement. `render` includes resolved strategies and field origins in desired records;
+`discover vm` reports its own effective strategy, using source defaults when options are omitted.
+
+A `/128` does not establish DHCP provenance. The strict rule never falls back to default IPv6
+heuristics. See [discovery](discovery.md#dhcpv6-requirement-and-windows-evidence) for prerequisites,
+correlation, unknown evidence and independent family outcomes.
 
 Entry `ttl` and `proxied` values override workspace defaults. Omitted or null entry values inherit
 the workspace default. When the **resolved** proxy value is null, updates omit `proxied` and retain
@@ -219,7 +273,7 @@ entries share one local source. Successes and failures are reused. Family select
 planning remain independent per entry. The next run queries again, even with the same runner.
 
 `discovery.timeout_seconds` bounds local `ip`, `pct`, and `qm` execution. Its finite positive default
-comes from shared package resources, so older YAML needs no new field. The limit does not apply to
+comes from shared package resources; current source files need no explicit timeout field. The limit does not apply to
 systemd lifecycle commands. A timed-out Guest yields error outcomes, independent entries continue,
 and configured targets stay protected from prune. No repeated automatic attempts occur in that run.
 

@@ -17,7 +17,10 @@ This repository intentionally stays narrow and predictable.
 - Discovery backends only return candidate addresses.
 - Address selection happens in discovery/selector code, not in DNS providers.
 - `discovery/windows.py` owns the fixed supplementary transport and strict protocol validation.
-- `discovery/windows_selection.py` correlates typed evidence and selects without I/O.
+- `discovery/windows_correlation.py` verifies complete inventories and produces generic facts.
+- `discovery/policies.py` selects from generic evidence without Windows DTOs or I/O.
+- `config/strategy.py` resolves policy and permission field by field; `LoadedWorkspace` retains
+  resolved strategies for operations and reporting. Entry edits validate proposed effective settings.
 - `probes/windows_ipv6.ps1` is the sole readable probe source; ship it in wheel and sdist.
 - Default-policy Guests never execute this probe. Keep raw and supplementary snapshots independent,
   scoped to one run, and never enrich shared QGA candidates by mutation.
@@ -32,7 +35,8 @@ This repository intentionally stays narrow and predictable.
 - Outside-workspace defaults follow the formal runtime config pattern.
 - Outside-workspace defaults live under the `dnsleaf.config` package.
 - Formal defaults live in `src/dnsleaf/config_defaults/`; scaffold text and layout live in `src/dnsleaf/templates/`.
-- Loading order is fixed: defaults -> override -> deep merge -> validate.
+- External source versions must explicitly be workspace 5 / entries 3 before defaults merge.
+- Loading then follows defaults -> override -> deep merge -> validate; no old-schema parsers.
 - Runtime-only resolution is explicit and separate from raw config loading.
 - Operator-facing execution config belongs in `workspace.yaml`, not in a root CLI config file.
 - Shared semantics should reuse shared sub-models instead of duplicating near-identical config schemas.
@@ -113,8 +117,8 @@ and outside-workspace configurations. They apply only to address-discovery comma
 fakes must accept `timeout` explicitly; do not guess old signatures by catching TypeError.
 
 Windows Guest tests are synthetic standard QGA fixtures. No Windows host runner, live-PVE CI, guest
-OS detection or Guest-side updater is needed. The Windows DHCPv6 policy explicitly opts into a
-fixed read-only PowerShell 5.1 metadata query; do not introduce arbitrary scripts or guest-exec
+OS detection or Guest-side updater is needed. The evidence source permits a
+fixed read-only PowerShell 5.1 metadata query, demanded only by strict policy; do not introduce arbitrary scripts or guest-exec
 frameworks. Test transport completion, ASCII-safe JSON/UTF-16LE command encoding, strict field types,
 identity/inventory consistency, policy ordering, family independence, and DNS/prune safety using fakes.
 No synthetic test establishes live PowerShell, PVE or Windows acceptance. Keep the stable `ci / format-lint` and `ci / tests` checks.

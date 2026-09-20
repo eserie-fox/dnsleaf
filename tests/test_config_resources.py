@@ -23,13 +23,13 @@ def test_config_default_resources_are_readable_via_package_loaders() -> None:
     assert "config_version" not in outside_workspace_defaults
     assert outside_workspace_defaults["dnsleaf_logging"]["stream"] == "stderr"
     assert outside_workspace_defaults["paths"]["pct_bin"] == "pct"
-    assert workspace_defaults["config_version"] == 4
+    assert workspace_defaults["config_version"] == 5
     assert workspace_defaults["default_ttl"] == "auto"
     assert workspace_defaults["default_proxied"] is None
     assert workspace_defaults["dnsleaf_logging"]["file_path"] == "runtime/logs/dnsleaf.log"
     assert workspace_defaults["dnsleaf_logging"]["stream"] == "none"
     assert workspace_defaults["paths"]["systemctl_bin"] == "systemctl"
-    assert entries_defaults == {"config_version": 2, "entries": []}
+    assert entries_defaults == {"config_version": 3, "entries": []}
     assert "runtime/logs" in layout.directories
     assert "Place secret material" in secrets_readme
 
